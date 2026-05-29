@@ -20,7 +20,7 @@ Python で実装された、ターミナル上で動作するシンプルな BMS
 
 ```bash
 # 1. 仮想環境作成
-python3-m venv venv
+python3 -m venv venv
 
 # 2. 仮想環境有効化（Linux/macOS）
 source venv/bin/activate
