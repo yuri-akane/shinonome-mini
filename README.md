@@ -48,4 +48,5 @@ The player will launch a curses UI. Use the keys defined in `settings.toml` (def
 - GPLv3
 
 ## Acknowledgements
-- Thanks to the original Shinonome author.
+- Thanks deeply to the original [shinonome](https://github.com/kuroclef/shinonome) author.
+- 全く別物になっていますが、基本コンセプトをお借りしているので-miniとさせていただきました。
