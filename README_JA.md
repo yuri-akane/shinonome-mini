@@ -57,4 +57,5 @@ python3 main.py path/to/your_chart.bms
 - GPLv3
 
 ## 謝辞
-- 参考とさせていただいた [shinonome](https://github.com/kuroclef/shinonome) の作者様にこの場を借りて感謝を申し上げます。
+- こちらのプロジェクトの [shinonome](https://github.com/kuroclef/shinonome) の作者様にこの場を借りて感謝を申し上げます。
+- 全く別物になっていますが、基本コンセプトをお借りしているので-miniとさせていただきました。
