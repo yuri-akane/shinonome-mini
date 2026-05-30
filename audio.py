@@ -120,7 +120,7 @@ class AudioEngine:
         if not os.path.exists(file_path):
             return False
         try:
-            # 常に SIGNED16, 2チャンネル, 44100Hz にデコードする
+            # PlaybackDeviceと同じにする
             sound = miniaudio.decode_file(
                 file_path,
                 output_format=miniaudio.SampleFormat.SIGNED16,
