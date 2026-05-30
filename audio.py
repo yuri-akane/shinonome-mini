@@ -9,7 +9,7 @@ class AudioEngine:
         self.active_sounds = [] # [{"samples": array, "position": int}]
         self.lock = threading.Lock()
         
-        # PlaybackDeviceの初期化 – バッファサイズは milliseconds で指定 (300ms) で安定化
+        # PlaybackDeviceの初期化 – バッファサイズは milliseconds で指定、 (例えば1000msで1秒に一回しか音が鳴らない）
         self.device = miniaudio.PlaybackDevice(
             output_format=miniaudio.SampleFormat.SIGNED16,
             nchannels=2,
