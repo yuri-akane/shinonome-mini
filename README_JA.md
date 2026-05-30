@@ -64,4 +64,5 @@ python3 main.py path/to/your_chart.bms
 - bmson
 - ロングノート
 - STOP、BPM変更、SCROLL
+- 小節長変更
 - global変数使うな
