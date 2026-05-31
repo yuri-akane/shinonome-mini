@@ -66,3 +66,12 @@ python3 main.py path/to/your_chart.bms
 - STOP、BPM変更、SCROLL
 - 小節長変更
 - global変数使うな
+
+## minimalに保つためやらない
+- 画像・動画表示
+- HS(hispeed)
+- hidden/sudden
+- スコア記録・保存・送信
+- プレイリスト（※別のプログラムではやる）
+- 地雷ノーツ
+- #RANDOM〜#IF命令
