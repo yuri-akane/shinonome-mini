@@ -54,5 +54,4 @@ The player will launch a curses UI. Use the keys defined in `settings.toml` (def
 - 全く別物になっていますが、基本コンセプトをお借りしているので-miniとさせていただきました。
 
 ## todo
-- スクラッチがrightかつrandomつけたときenbugしているのでdebug
 - bmson, longnote, STOP, SCROLL...

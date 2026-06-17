@@ -668,11 +668,11 @@ def main(stdscr):
                 player.channel_to_lane = channel_to_lane
 
                 max_lane = 15 if player.chart.get('mode', 'SP') == 'DP' else 7
-                # Determine scratch lanes based on mode
+                # Determine scratch lanes based on mode and side
                 if player.chart.get('mode', 'SP') == 'DP':
                     scratch_lanes = {0, max_lane}
                 else:
-                    scratch_lanes = {0}
+                    scratch_lanes = {7} if scratch_side == "right" else {0}
                 key_lanes = [i for i in range(max_lane + 1) if i not in scratch_lanes]
                 lane_map = {}
                 if opt_random:

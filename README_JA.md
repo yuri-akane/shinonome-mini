@@ -65,7 +65,6 @@ python3 main.py path/to/your_chart.bms
 - 全く別物になっていますが、基本コンセプトをお借りしているので-miniとさせていただきました。
 
 ## あとでやる
-- スクラッチがrightかつrandomつけたときenbugしているのでdebug
 - bmson
 - ロングノート
 - STOP、SCROLL
