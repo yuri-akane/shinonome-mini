@@ -4,7 +4,7 @@ A minimal console BMS player written in Python. It runs in a terminal using `cur
 
 ## Features
 - Supports **SP,DP**
-- Supports **AUTO PLAY / MIRROR / RANDOM / EASY**
+- Supports **AUTO PLAY / MIRROR / RANDOM / EASY** options
 - Simple configuration through `settings.toml`
 - Minimal dependencies – only **miniaudio** for sound playback
 
@@ -41,12 +41,18 @@ The player will launch a curses UI. Use the keys defined in `settings.toml` (def
 ## Notes & Caveats
 - The UI is terminal‑only; no graphical interface.
 - Only a subset of BMS commands are currently parsed. BMP (`01`) is kept for BGM, while background layers (BGA) and other visual commands are skipped.
-- STOP and BPM‑change commands are marked for future implementation.
+- **STOP** and **SCROLL** commands are not yet supported.
 - Works best on Shift‑JIS encoded BMS files.
-
+- `settings.toml` does **not** allow assigning **Shift / Ctrl / Alt** keys.
+- bmson format is not yet supported.
+- 
 ## License
 - GPLv3
 
 ## Acknowledgements
 - Thanks deeply to the original [shinonome](https://github.com/kuroclef/shinonome) author.
 - 全く別物になっていますが、基本コンセプトをお借りしているので-miniとさせていただきました。
+
+## todo
+- スクラッチがrightかつrandomつけたときenbugしているのでdebug
+- bmson, longnote, STOP, SCROLL...
