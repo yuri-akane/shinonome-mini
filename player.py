@@ -11,20 +11,22 @@ class Player:
     def __init__(self, audio_engine, channel_to_lane):
         self.audio = audio_engine
         self.channel_to_lane = channel_to_lane
+        self.debug = False
+        self.log_path = os.path.join(os.path.dirname(__file__), 'player_debug.log')
         self.chart = None
         self.is_playing = False
         self.start_time = 0
-        self.resolution = 480 # bmson default
+        self.resolution = 480  # bmson default
         self.auto_scratch = False
-        
+
         # 判定・演出関連
-        self.last_judgement = "" # "PERFECT", "GREAT", "GOOD", "BAD", "MISS"
-        self.judgement_time = 0 # 判定が発生した時刻
-        self.key_pressed_time = [0.0] * 16 # 各レーン(0〜15)の最終打鍵時刻 (演出用)
-        
+        self.last_judgement = ""  # "PERFECT", "GREAT", "GOOD", "BAD", "MISS"
+        self.judgement_time = 0  # 判定が発生した時刻
+        self.key_pressed_time = [0.0] * 16  # 各レーン(0〜15)の最終打鍵時刻 (演出用)
+
         # ゲージ・スコア・統計情報
-        self.gauge = 22.0 # グルーヴゲージ (初期値 22%)
-        self.ex_score = 0 # EXスコア (PERFECT=2, GREAT=1)
+        self.gauge = 22.0  # グルーヴゲージ (初期値 22%)
+        self.ex_score = 0  # EXスコア (PERFECT=2, GREAT=1)
         self.combo = 0
         self.max_combo = 0
         self.perfect_count = 0
@@ -32,7 +34,47 @@ class Player:
         self.good_count = 0
         self.bad_count = 0
         self.miss_count = 0
-        self.total_playable_notes = 0 # 総プレイノーツ数
+        self.total_playable_notes = 0  # 総プレイノーツ数
+
+
+
+    def _debug_log(self, msg: str):
+        """Write debug message to log file if debugging is enabled."""
+        if not getattr(self, 'debug', False):
+            return
+        try:
+            with open(self.log_path, 'a', encoding='utf-8') as f:
+                f.write(msg + '\n')
+        except Exception:
+            pass
+
+    def _init_event_state(self):
+        """Initialize event flags and count playable notes.
+        Called after loading a chart to separate concerns from the playback loop.
+        """
+        events = self.chart.get('events', [])
+        self.total_playable_notes = 0
+        for event in events:
+            channel = event.get('channel', '01')
+            event['is_playable'] = channel in self.channel_to_lane
+            event['state'] = 0  # 0: PENDING, 1: HIT (or BGM processed), 2: MISS
+            if event['is_playable']:
+                self.total_playable_notes += 1
+
+    def apply_measure_change(self, event):
+        """Update current measure length multiplier based on a measure change event.
+        This separates measure-length handling from BPM handling.
+        """
+        self.current_measure_multiplier = event.get('measure_mult', 1.0)
+
+    def apply_bpm_change(self, event):
+        """Update current BPM based on a BPM change event.
+        Centralizes BPM state mutation and updates speed factor for UI scaling.
+        """
+        self.current_bpm = event['bpm']
+        if getattr(self, 'initial_bpm', None):
+            self.speed_factor = self.current_bpm / self.initial_bpm
+
 
     def load_chart(self, file_path):
         ext = os.path.splitext(file_path)[1].lower()
@@ -43,7 +85,18 @@ class Player:
             parser = BmsParser()
             self.resolution = 1.0 # BMSは拍単位で計算
 
-        self.chart = parser.parse(file_path)
+        try:
+            self.chart = parser.parse(file_path)
+            # After parsing, store the initial BPM for reference and speed scaling
+            self.initial_bpm = self.chart['info']['bpm']
+            self.current_bpm = self.initial_bpm  # current BPM starts as initial
+            # Speed factor (relative to initial BPM) used by UI for visual fall speed
+            self.speed_factor = 1.0
+            self.timeline = self.chart.get('timeline', None)
+            self._debug_log(f"Initial BPM set to {self.initial_bpm}")
+        except Exception as e:
+            self._debug_log(f"Error loading chart: {e}")
+            raise
         # Load audio assets if present
         if 'wav_table' in self.chart:
             self.audio.load_wav_table(self.chart['wav_table'], self.chart['base_path'])
@@ -142,12 +195,7 @@ class Player:
         min_diff = 999.0
         
         for event in playable_events:
-            # Adjust timing: for BMS (resolution == 1.0) use direct beat conversion
-            if self.resolution == 1.0:
-                target_seconds = event['time'] * (60 / initial_bpm)
-            else:
-                target_seconds = (event['time'] / self.resolution) * (60 / initial_bpm)
-            diff = abs(target_seconds - current_time)
+            diff = abs(event['time'] - current_time)
             if diff < min_diff:
                 min_diff = diff
                 best_event = event
@@ -157,7 +205,7 @@ class Player:
         # タイミングの調整値を反映 (settings.tomlのタイミングオフセット)
         # 後で設定ローダーから player.judgement_offset_ms を代入する予定
         offset_seconds = getattr(self, 'judgement_offset_ms', 0) / 1000.0
-        adjusted_diff = abs((best_event['time'] * (60 / initial_bpm) if self.resolution == 1.0 else (best_event['time'] / self.resolution) * (60 / initial_bpm)) + offset_seconds - current_time) if best_event else min_diff
+        adjusted_diff = abs(best_event['time'] + offset_seconds - current_time) if best_event else min_diff
 
         # 判定窓（BAD以内）ならHIT
         if best_event and adjusted_diff <= bad_w:
@@ -201,6 +249,13 @@ class Player:
         if not self.chart:
             return
 
+        # Clear play_timing_debug.log on start
+        # try:
+        #     with open("play_timing_debug.log", "w", encoding="utf-8") as f:
+        #         f.write("=== Playback Timing Debug Log Started ===\n")
+        # except Exception:
+        #     pass
+
         self.is_playing = True
         self.last_judgement = ""
         self.judgement_time = 0
@@ -219,18 +274,15 @@ class Player:
         
         events = self.chart['events']
         initial_bpm = self.chart['info']['bpm']
-        
-        # 各ノーツのプレイ可否と初期状態のセットアップ、総ノーツ数の集計
-        self.total_playable_notes = 0
-        for event in events:
-            channel = event.get('channel', '01')
-            event['is_playable'] = channel in self.channel_to_lane
-            event['state'] = 0 # 0: PENDING, 1: HIT (or BGM processed), 2: MISS
-            if event['is_playable']:
-                self.total_playable_notes += 1
+        # Prepare event flags and count playable notes
+        self._init_event_state()
             
+        self._debug_log("=== First 10 events (beat, time) ===")
+        for i, ev in enumerate(events[:10]):
+            self._debug_log(f"{i}: beat={ev.get('beat')}, time={ev.get('time')}")
         self.start_time = time.perf_counter()
         event_index = 0
+        self.current_bpm = initial_bpm
         
         while self.is_playing:
             current_time = self.get_current_time()
@@ -242,52 +294,50 @@ class Player:
                     all_processed = False
                     break
             
-            # 自動発音（BGM または AutoPlay時のプレイノーツ）
+            # 自動発音（BGM または AutoPlay時のプレイノーツ、およびBPM変化イベント）
             while event_index < len(events):
                 event = events[event_index]
-                # Adjust timing for BMS vs bmson
-                if self.resolution == 1.0:
-                    target_seconds = event['time'] * (60 / initial_bpm)
-                else:
-                    target_seconds = (event['time'] / self.resolution) * (60 / initial_bpm)
+                target_seconds = event['time']
+                
+                # Both control events and audio triggers must wait until their target time is reached
                 if current_time >= target_seconds:
-                    is_scratch = False
-                    if event['is_playable']:
-                        lane_idx = self.channel_to_lane.get(event['channel'])
-                        is_dp = (self.chart.get('mode', 'SP') == 'DP')
-                        if is_dp:
-                            # DPのときは最左端(0)と最右端(15)がスクラッチ
-                            if lane_idx in (0, 15):
-                                is_scratch = True
-                        else:
-                            # SPのときは、config.CHANNEL_TO_LANEでマッピングされた側がスクラッチ
-                            # LEFTスクラッチはレーン0、RIGHTスクラッチはレーン7
-                            # 
-                            # または、動的マッピングで "16" が指すレーンインデックスを取得
-                            scratch_lane = self.channel_to_lane.get("16")
-                            if lane_idx == scratch_lane:
-                                is_scratch = True
-                    
-                    # オートプレイ、BGM、またはオートスクラッチ対象のスクラッチノーツの場合
-                    if auto_play or not event['is_playable'] or (self.auto_scratch and is_scratch):
+                    # Process control events (BPM or measure changes)
+                    from control import process_control_event
+                    old_bpm = self.current_bpm
+                    old_mult = getattr(self, 'current_measure_multiplier', 1.0)
+                    if process_control_event(self, event, auto_play):
+                        # try:
+                        #     with open("play_timing_debug.log", "a", encoding="utf-8") as f:
+                        #         f.write(f"[Time {current_time:.3f}s] Processed control event: channel={event.get('channel')}, "
+                        #                 f"BPM: {old_bpm:.1f} -> {self.current_bpm:.1f}, "
+                        #                 f"Mult: {old_mult:.3f} -> {getattr(self, 'current_measure_multiplier', 1.0):.3f}\n")
+                        # except Exception:
+                        #     pass
+                        # Control event handled; move to next event
+                        event_index += 1
+                        continue
+                        
+                    if event['channel'] == '01':
+                        # Always play BGM regardless of is_playable or auto_play
                         self.audio.play(event['sound_id'])
-                        event['state'] = 1 # 処理済みにする
-                        if event['is_playable']:
-                            # スコアなどの加算（オートスクラッチまたはオートプレイ時）
-                            self.ex_score += 2
-                            self.perfect_count += 1
-                            self.combo += 1
-                            self.max_combo = max(self.max_combo, self.combo)
-                            # 動的ゲージ増加量の適用
-                            inc = self.get_gauge_increment()
-                            self.gauge = min(100.0, self.gauge + inc)
-                            self.last_judgement = "PERFECT"
-                            self.judgement_time = current_time
-                            
-                            lane_idx = self.channel_to_lane.get(event['channel'])
-                            if lane_idx is not None:
-                                self.key_pressed_time[lane_idx] = current_time
+                        event['state'] = 1
+                    elif event['is_playable']:
+                        # Determine if this event is a scratch note
+                        channel = event.get('channel')
+                        lane_idx = self.channel_to_lane.get(channel)
+                        is_dp = (self.chart.get('mode', 'SP') == 'DP')
+                        is_scratch = False
+                        if lane_idx is not None:
+                            if is_dp:
+                                is_scratch = (lane_idx in (0, 15))
+                            else:
+                                is_scratch = (channel == "16" or lane_idx == 0)
+                        
+                        if auto_play or (self.auto_scratch and is_scratch):
+                            self.audio.play(event['sound_id'])
+                            event['state'] = 1
                     event_index += 1
+                    continue
                 else:
                     break
                     
@@ -311,7 +361,7 @@ class Player:
                             if is_scratch:
                                 continue
                         
-                        target_seconds = (event['time'] / self.resolution) * (60 / initial_bpm)
+                        target_seconds = event['time']
                         offset_seconds = getattr(self, 'judgement_offset_ms', 0) / 1000.0
                         # 判定（BAD窓）を過ぎたら自動的にMISS
                         if current_time - (target_seconds + offset_seconds) > bad_w:
@@ -326,13 +376,14 @@ class Player:
                             
             # 終了条件：全イベントが処理され、かつ再生中の音がすべて消えた
             if all_processed and len(self.audio.active_sounds) == 0:
+                self.is_playing = False
                 break
                 
             # 描画コールバックの呼び出し
             if on_update:
-                on_update(current_time, events, event_index, initial_bpm, self.resolution, auto_play)
+                on_update(current_time, events, event_index, self.current_bpm, self.resolution, auto_play)
                 
-            time.sleep(0.01) # 100 FPS
+            time.sleep(0.005) #こっちのsleepは低スペックPCでは取り除いて100%使う。
             
         self.is_playing = False
 

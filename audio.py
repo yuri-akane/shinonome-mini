@@ -1,5 +1,8 @@
 import miniaudio
 import os
+# Ensure logger path works from project root
+#from latency_logger import log_event
+
 import threading
 import array
 
@@ -9,12 +12,12 @@ class AudioEngine:
         self.active_sounds = [] # [{"samples": array, "position": int}]
         self.lock = threading.Lock()
         
-        # PlaybackDeviceの初期化 – バッファサイズは milliseconds で指定、 (例えば1000msで1秒に一回しか音が鳴らない）
+        # PlaybackDeviceの初期化 – バッファサイズは milliseconds で指定
         self.device = miniaudio.PlaybackDevice(
             output_format=miniaudio.SampleFormat.SIGNED16,
             nchannels=2,
             sample_rate=24000,
-            buffersize_msec=10
+            buffersize_msec=3,
         )
         
         # ジェネレータの作成と起動
@@ -25,17 +28,15 @@ class AudioEngine:
         self.device.start(self.generator)
 
     def _mix_generator(self):
-        # 初回の呼び出しでフレーム数を取得
+        # Initial yield to receive the first frame count request
         required_frames = yield b""
         while True:
-            # デバイスから要求されたフレーム数をサンプル数に変換 (ステレオ)
             required_samples = required_frames * 2
-
-            # 出力バッファを整数リストで確保（オーバーフロー防止）
+            # Initialize output buffer as a list of ints for safe mixing
             output_list = [0] * required_samples
-
-            # アクティブ音源をミキシング
             finished_sounds = []
+
+            # Mix active sounds safely
             with self.lock:
                 sounds_to_process = list(self.active_sounds)
             for sound in sounds_to_process:
@@ -49,70 +50,24 @@ class AudioEngine:
                 sound["position"] += to_copy
                 if sound["position"] >= src_len:
                     finished_sounds.append(sound)
-            # 終了した音源を削除
+
+            # Remove finished sounds
             if finished_sounds:
                 with self.lock:
                     for snd in finished_sounds:
                         if snd in self.active_sounds:
                             self.active_sounds.remove(snd)
 
-            # クリッピングして array('h') に変換
+            # Clip and convert to signed 16‑bit array
             output = array.array('h', [0] * required_samples)
-            for i in range(required_samples):
-                val = output_list[i]
+            for i, val in enumerate(output_list):
                 if val > 32767:
                     val = 32767
                 elif val < -32768:
                     val = -32768
                 output[i] = val
 
-            # 次回呼び出し用にフレーム数を受け取る
-            required_frames = yield output.tobytes()
-                        
-            required_samples = required_frames * 2 # stereo
-            
-            # 出力バッファを通常の Python リスト (int) で0初期化（オーバーフロー防止）
-            output_list = [0] * required_samples
-            
-            # 再生中の音源をミキシング
-            finished_sounds = []
-            with self.lock:
-                # コピーを作成してループを回す
-                sounds_to_process = list(self.active_sounds)
-                
-            for sound in sounds_to_process:
-                pos = sound["position"]
-                src = sound["samples"]
-                src_len = len(src)
-                
-                remaining = src_len - pos
-                to_copy = min(required_samples, remaining)
-                
-                # サンプルの加算（通常のリストなので上限・下限でのエラーが発生しない）
-                for i in range(to_copy):
-                    output_list[i] += src[pos + i]
-                    
-                sound["position"] += to_copy
-                if sound["position"] >= src_len:
-                    finished_sounds.append(sound)
-            
-            # 再生終了した音源を削除
-            if finished_sounds:
-                with self.lock:
-                    for sound in finished_sounds:
-                        if sound in self.active_sounds:
-                            self.active_sounds.remove(sound)
-                            
-            # クリッピング（クランプ）処理を行いながら array.array('h') に変換
-            output = array.array('h', [0] * required_samples)
-            for i in range(required_samples):
-                val = output_list[i]
-                if val > 32767:
-                    val = 32767
-                elif val < -32768:
-                    val = -32768
-                output[i] = val
-                    
+            # Yield mixed audio and receive next frame request
             required_frames = yield output.tobytes()
 
     def load_sound(self, sound_id, file_path):
@@ -120,7 +75,7 @@ class AudioEngine:
         if not os.path.exists(file_path):
             return False
         try:
-            # PlaybackDeviceと同じにする
+            # 常に SIGNED16, 2チャンネル, 24000Hz にデコードする
             sound = miniaudio.decode_file(
                 file_path,
                 output_format=miniaudio.SampleFormat.SIGNED16,
@@ -157,10 +112,14 @@ class AudioEngine:
             sound = self.sounds[sound_id]
             # 新しい再生インスタンスを作成して追加
             with self.lock:
+                # Log when a sound is queued for playback
+                # if not sound_id.startswith('01'): #???01はWAV01なのか12301なのか混同している？
+                #     log_event('play_queued', f'sound_id={sound_id}')
                 self.active_sounds.append({
                     "samples": sound.samples,
                     "position": 0
                 })
+
         else:
             pass # サイレント
 

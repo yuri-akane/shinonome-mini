@@ -2,17 +2,101 @@ import json
 import os
 import re
 
+from typing import Dict, List, Tuple, Any
+import logging
+
 class BmsParser:
-    # ... (実装済み)
+    """Parse BMS files into a structured chart representation.
+    The parser extracts header information, wav table, measure multipliers,
+    and builds a list of timed events.
+    """
     def __init__(self):
         self.header_re = re.compile(r"^#(\w+)\s+(.+)")
-        self.data_re = re.compile(r"^#(\d{3})(\d{2}):(\w+)")
+        self.data_re = re.compile(r"^#(\d{3})(\d{2}):(.+)")
 
-    def parse(self, file_path):
+    def _parse_header(self, line: str, info: dict, wav_table: dict) -> None:
+        """Parse a header line and update info or wav_table.
+        Args:
+            line: The raw line string starting with '#'.
+            info: Dictionary accumulating song metadata.
+            wav_table: Dictionary mapping wav IDs to file paths.
+        """
+        header_match = self.header_re.match(line)
+        if not header_match:
+            return
+        key, val = header_match.groups()
+        if key == "TITLE":
+            info['title'] = val
+        elif key == "ARTIST":
+            info['artist'] = val
+        elif key == "BPM":
+            try:
+                info['bpm'] = float(val)
+            except Exception:
+                pass
+        elif key.startswith("BPM") and len(key) > 3:
+            id_36 = key[3:].upper()
+            try:
+                info['bpm_table'][id_36] = float(val)
+            except Exception:
+                pass
+        elif key.startswith("STOP") and len(key) > 4:
+            id_36 = key[4:].upper()
+            try:
+                info['stop_table'][id_36] = float(val)
+            except Exception:
+                pass
+        elif key == "RANK":
+            try:
+                info['rank'] = int(val)
+            except Exception:
+                pass
+        elif key.startswith("WAV"):
+            wav_id = key[3:].upper()
+            wav_table[wav_id] = val
+
+    def _parse_data(self, line: str, measures_multiplier: list, raw_data: list) -> None:
+        """Parse a data line (#measurechannel:data) and update measure multiplier or raw data.
+        Args:
+            line: The raw line string.
+            measures_multiplier: List of beat multipliers per measure.
+            raw_data: Accumulator for note data tuples.
+        """
+        data_match = self.data_re.match(line)
+        if not data_match:
+            return
+        measure, channel, data_str = data_match.groups()
+        measure_idx = int(measure)
+        if channel == "02":
+            try:
+                multiplier = float(data_str)
+                if multiplier > 0 and 0 <= measure_idx < 1000:
+                    measures_multiplier[measure_idx] = multiplier
+            except Exception:
+                pass
+            return
+        skip_channels = {"04", "05", "06", "07", "0A", "0B", "0C", "0D", "0E", "0F"}
+        if channel in skip_channels:
+            return
+        raw_data.append((measure_idx, channel, data_str))
+
+    def parse(self, file_path: str) -> dict:
+        """Parse a BMS file and return a structured chart dict.
+        The method builds header info, wav table, measures multiplier, raw data,
+        then computes beat timings and converts them to absolute seconds.
+        """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"BMS file not found: {file_path}")
 
-        info = {'title': '', 'artist': '', 'bpm': 120.0, 'rank': 3, 'total': None}
+        info = {
+            'title': '',
+            'artist': '',
+            'bpm': 120.0,
+            'rank': 3,
+            'total': None,
+            'bpm_table': {},
+            'stop_table': {}
+        }
         wav_table = {}
         measures_multiplier = [1.0] * 1000
         raw_data = []
@@ -23,69 +107,144 @@ class BmsParser:
                 line = line.strip()
                 if not line.startswith('#'): continue
 
+                # Determine if line is a header or data and delegate parsing
                 header_match = self.header_re.match(line)
                 if header_match:
-                    key, val = header_match.groups()
-                    if key == "TITLE": info['title'] = val
-                    elif key == "ARTIST": info['artist'] = val
-                    elif key == "BPM":
-                        try: info['bpm'] = float(val)
-                        except: pass
-                    elif key == "RANK":
-                        try: info['rank'] = int(val)
-                        except: pass
-                    elif key == "TOTAL":
-                        try:
-                            total_val = int(val)
-                            if total_val < 0:
-                                raise ValueError
-                            info['total'] = total_val
-                        except:
-                            # Default when invalid or negative
-                            info['total'] = 0
-                    elif key.startswith("WAV"):
-                        id_36 = key[3:]
-                        wav_table[id_36] = val
+                    # Use helper to parse header line
+                    self._parse_header(line, info, wav_table)
                     continue
-
+                # If not a header, try parsing as data line
                 data_match = self.data_re.match(line)
                 if data_match:
-                    measure, channel, data_str = data_match.groups()
-                    measure_idx = int(measure)
-                    # Skip unnecessary BMS commands (e.g., BMP, BGA, background layers)
-                    # NOTE: Channel "01" is BGM and must be kept.
-                    # Future work: implement handling for STOP (channel "03") and BPM change (channel "08") commands.
-                    skip_channels = {"03", "04", "05", "06", "07", "08", "09", "0A", "0B", "0C", "0D", "0E", "0F"}
-                    if channel in skip_channels:
-                        continue
-                    raw_data.append((measure_idx, channel, data_str))
+                    # Use helper to parse data line
+                    self._parse_data(line, measures_multiplier, raw_data)
+                # otherwise ignore line
 
-        measure_beats = [0.0] * 1000
+        # Debug: after parsing, log raw_data count
+        # import logging
+# logging.debug(f"Raw data entries: {len(raw_data)}")
+        # End of file processing; compute measure beats
         current_beat = 0.0
+        measure_beats = [0.0] * 1000
         for i in range(1000):
             measure_beats[i] = current_beat
             current_beat += 4.0 * measures_multiplier[i]
 
+        # 拍単位での各イベントの beat 値の算出
         events = []
+        # Debug: before building events, note raw_data count
+# logging.debug(f"Building events from {len(raw_data)} raw data entries")
         for measure, channel, data_str in raw_data:
             objects = [data_str[i:i+2] for i in range(0, len(data_str), 2)]
             n = len(objects)
             for i, obj in enumerate(objects):
                 if obj == "00": continue
+                # Calculate beat position within the measure
                 beat = measure_beats[measure] + (i / n) * 4.0 * measures_multiplier[measure]
-                events.append({
+
+                bpm_val = None
+                stop_val = None
+                if channel == "03":
+                    # 16進数の値がそのままBPM値
+                    try:
+                        bpm_val = float(int(obj, 16))
+                    except:
+                        pass
+                elif channel == "08":
+                    # 拡張BPMテーブル（36進数定義）から参照
+                    ref_key = obj.upper()
+                    if ref_key in info['bpm_table']:
+                        bpm_val = info['bpm_table'][ref_key]
+                elif channel == "09":
+                    # STOPテーブルから参照
+                    ref_key = obj.upper()
+                    if ref_key in info['stop_table']:
+                        stop_val = info['stop_table'][ref_key]
+
+                event_data = {
                     'beat': beat,
-                    'time': beat, # Compatibility
+                    'time': 0.0, # あとで秒数に変換して上書きする
                     'sound_id': obj,
                     'channel': channel
-                })
+                }
+                if bpm_val is not None:
+                    event_data['bpm'] = bpm_val
+                if stop_val is not None:
+                    event_data['stop'] = stop_val
+                events.append(event_data)
+                
 
-        events.sort(key=lambda x: x['beat'])
+        # Add measure length change events for UI speed factor handling
+        for idx, mult in enumerate(measures_multiplier):
+            if mult != 1.0:
+                # Create a control event at the start of the measure
+                event_data = {
+                    'beat': measure_beats[idx],
+                    'time': 0.0,  # will be filled in later conversion loop
+                    'channel': '02',
+                    'measure_mult': mult
+                }
+                events.append(event_data)
+
+        # Add visual measure lines at the start of each measure
+        max_beat = 0.0
+        if events:
+            max_beat = max(ev['beat'] for ev in events)
+        for idx, m_start_beat in enumerate(measure_beats):
+            if m_start_beat > max_beat:
+                break
+            events.append({
+                'beat': m_start_beat,
+                'time': 0.0,
+                'channel': 'measure_line',
+                'measure_idx': idx
+            })
+
+        # beat順およびチャンネルプライオリティ順にソートする
+        # BPM変更やSTOPなどの制御イベントは、同じbeatにある音符イベントよりも先に評価されるべき
+        def get_event_priority(ev):
+            ch = ev.get('channel', 'XX')
+            if ch in ("03", "08"): return 0  # BPM change first
+            if ch == "09": return 1          # STOP second
+            if ch == "measure_line": return 1.5
+            return 2                         # Notes / Sound channels last
+
+        events.sort(key=lambda x: (x['beat'], get_event_priority(x)))
+        
+        # 時系列順（beat順）にBPM変化とSTOPコマンドを適用しながら累積経過時間を計算する。
+        current_sec = 0.0
+        prev_beat = 0.0
+        current_bpm = info['bpm']
+
+        for ev in events:
+            ev_beat = ev['beat']
+            delta_beat = ev_beat - prev_beat
+            if delta_beat > 0:
+                current_sec += delta_beat * (60.0 / current_bpm)
+            
+            ev['time'] = current_sec
+            
+            # 制御命令の状態の適用
+            if 'bpm' in ev:
+                current_bpm = ev['bpm']
+            if 'stop' in ev:
+                # STOP時間は 192分の1拍 を 1 とする。
+                # 停止時間（秒） = (STOP値 / 192) * (60.0 / 現在のBPM)
+                stop_sec = (ev['stop'] / 192.0) * (60.0 / current_bpm)
+                current_sec += stop_sec
+                
+            prev_beat = ev_beat
+
         # If #TOTAL is missing or non‑positive, estimate a sensible default.
         # Use common BMS community formula: TOTAL = 7.605 * notes / (0.01 * notes + 6.5)
         # Clamp to a minimum of 260 (many players enforce this).
         if not isinstance(info.get('total'), (int, float)) or info['total'] <= 0:
-            note_count = len(events)
+            # プレイ可能なノーツのみをカウント（チャンネル03/08/09や01のBGMを除いた、11〜29などのレーンチャンネル）
+            playable_channels = {
+                "11", "12", "13", "14", "15", "16", "17", "18", "19",
+                "21", "22", "23", "24", "25", "26", "27", "28", "29"
+            }
+            note_count = sum(1 for ev in events if ev['channel'] in playable_channels)
             if note_count > 0:
                 estimated = int(7.605 * note_count / (0.01 * note_count + 6.5))
                 if estimated < 260:
@@ -93,11 +252,85 @@ class BmsParser:
                 info['total'] = estimated
             else:
                 info['total'] = 0
+        # Construct BpmTimeline
+        from timing import BpmTimeline
+        bpm_timeline_events = []
+        stop_timeline_events = []
+        for ev in events:
+            if 'bpm' in ev:
+                bpm_timeline_events.append((ev['beat'], ev['bpm']))
+            if 'stop' in ev:
+                stop_timeline_events.append((ev['beat'], ev['stop']))
+                
+        timeline = BpmTimeline(
+            initial_bpm=info['bpm'],
+            bpm_events=bpm_timeline_events,
+            stop_events=stop_timeline_events,
+            measures_multiplier=measures_multiplier
+        )
+
+        # Generate default channel_to_lane mapping based on mode and scratch side (default left)
+        mode = info.get('mode', 'SP')
+        # Left scratch mapping (default)
+        CHANNEL_TO_LANE_LEFT = {
+            "16": 0,   # scratch (1P)
+            "17": 0,   # foot pedal (1P)
+            "11": 1,
+            "12": 2,
+            "13": 3,
+            "14": 4,
+            "15": 5,
+            "18": 6,
+            "19": 7,
+            "21": 8,   # scratch (2P)
+            "22": 9,
+            "23": 10,
+            "24": 11,
+            "25": 12,
+            "28": 13,
+            "29": 14,
+            "26": 15,  # right scratch (2P)
+            "27": 15   # right foot pedal (2P)
+        }
+        CHANNEL_TO_LANE_RIGHT = {
+            "11": 0,
+            "12": 1,
+            "13": 2,
+            "14": 3,
+            "15": 4,
+            "18": 5,
+            "19": 6,
+            "16": 7,   # scratch (1P) → 右端
+            "17": 7,   # foot pedal (1P) → 右端
+            "21": 8,   # scratch (2P)
+            "22": 9,
+            "23": 10,
+            "24": 11,
+            "25": 12,
+            "28": 13,
+            "29": 14,
+            "26": 15,
+            "27": 15
+        }
+        # Choose mapping based on mode and default scratch side (left for SP)
+        if mode == 'DP':
+            # DP uses left mapping for both players (as in main)
+            channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
+        else:
+            # SP default to left side mapping
+            channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
+        
+        # Attach to chart result
+        chart_channel_to_lane = channel_to_lane
+
+
         return {
             'info': info,
             'wav_table': wav_table,
             'events': events,
-            'base_path': os.path.dirname(file_path)
+            'base_path': os.path.dirname(file_path),
+            'timeline': timeline,
+            'channel_to_lane': chart_channel_to_lane
         }
 
 class BmsonParser:

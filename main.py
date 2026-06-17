@@ -1,6 +1,8 @@
 import curses
 import time
 import sys
+import os
+#from latency_logger import log_event
 import tomllib
 from pathlib import Path
 from audio import AudioEngine
@@ -97,6 +99,24 @@ def load_auto_scratch(settings_path: str = "settings.toml") -> bool:
     except Exception:
         auto_scratch = False
     return auto_scratch
+
+show_measure_lines = True
+
+def load_show_measure_lines(settings_path: str = "settings.toml") -> bool:
+    """settings.toml の [play_options] show_measure_lines を読み込む。"""
+    global show_measure_lines
+    config_file = Path(__file__).parent / settings_path
+    if not config_file.is_file():
+        show_measure_lines = True
+        return show_measure_lines
+    try:
+        with config_file.open('rb') as f:
+            data = tomllib.load(f)
+        play_opts = data.get('play_options', {})
+        show_measure_lines = play_opts.get('show_measure_lines', True)
+    except Exception:
+        show_measure_lines = True
+    return show_measure_lines
 
 # レーンのインデックスマッピング (左スクラッチ用: デフォルト)
 CHANNEL_TO_LANE_LEFT = {
@@ -296,17 +316,26 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane):
                 stdscr.addstr(3, 2, f"Current size : {max_x} cols x {max_y} rows")
                 
             
-            # タイトル等の表示
-            stdscr.addstr(0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
-            title = player.chart['info'].get('title', 'Unknown')
-            stdscr.addstr(1, 2, f"Song: {title} / {player.chart['info'].get('artist', 'Unknown')}")
-            stdscr.addstr(2, 2, f"BPM: {initial_bpm:.1f} | Time: {current_time:.2f}s")
-            
             # 判定ラインとレーンの描画設定
             judgement_y = judgement_y_config
             start_y = 4
             lane_x = 4
             speed = 22.0 # 1秒あたりに進む行数
+            
+            if getattr(player, 'timeline', None):
+                beat_duration = 60.0 / player.initial_bpm
+                scale = speed * beat_duration
+                _, player_height, current_bpm, _ = player.timeline.get_state(current_time)
+            else:
+                scale = speed
+                player_height = current_time
+                current_bpm = getattr(player, 'current_bpm', initial_bpm)
+
+            # タイトル等の表示
+            stdscr.addstr(0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
+            title = player.chart['info'].get('title', 'Unknown')
+            stdscr.addstr(1, 2, f"Song: {title} / {player.chart['info'].get('artist', 'Unknown')}")
+            stdscr.addstr(2, 2, f"BPM: {current_bpm:.1f} | Time: {current_time:.2f}s")
             
             # Compute lane count based on mode
             lane_count = 16 if player.chart.get('mode', 'SP') == 'DP' else 8
@@ -426,26 +455,41 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane):
                     continue
                     
                 channel = event.get('channel')
-                if not channel or channel not in player.channel_to_lane:
+                is_measure_line = (channel == 'measure_line')
+                if is_measure_line and not getattr(player, 'show_measure_lines', True):
                     continue
-                lane_idx = player.channel_to_lane[channel]
-                note_str = LANE_CHARS[lane_idx]
+                if not is_measure_line:
+                    if not channel or channel not in player.channel_to_lane:
+                        continue
+                    lane_idx = player.channel_to_lane[channel]
+                    note_str = LANE_CHARS[lane_idx]
                 
-                # 再生時間を秒単位で計算
-                target_seconds = (event['time'] / resolution) * (60 / initial_bpm)
+                # 再生時間と座標計算
+                target_seconds = event['time']
+                if getattr(player, 'timeline', None):
+                    note_height = player.timeline.get_height_at_beat(event['beat'])
+                else:
+                    note_height = target_seconds
                 
-                # 画面上のY座標を算出 (未来のノーツは上に配置される)
-                y = judgement_y - int((target_seconds - current_time) * speed)
+                # 画面上のY座標を算出 (未来 of notes will be placed higher)
+                y = judgement_y - int((note_height - player_height) * scale)
                 
                 # レーン描画範囲内にあれば描画
                 if start_y <= y < judgement_y:
-                    # DPのときは1P(0~7)と2P(8~15)の間に、境界線2文字分(空白 + 新しい縦線 '|') の余分なスペースを空ける
-                    if lane_count == 16 and lane_idx >= 8:
-                        x = lane_x + 1 + lane_idx * 5 + 2
+                    if is_measure_line:
+                        if lane_count == 16:
+                            line_str = "+" + "----+" * 8 + " " + "+" + "----+" * 8
+                        else:
+                            line_str = "+" + "----+" * lane_count
+                        stdscr.addstr(y, lane_x, line_str, curses.A_DIM)
                     else:
-                        x = lane_x + 1 + lane_idx * 5
-                    stdscr.addstr(y, x, note_str)
-                elif y >= judgement_y:
+                        # DPのときは1P(0~7)と2P(8~15)の間に、境界線2文字分(空白 + 新しい縦線 '|') の余分なスペースを空ける
+                        if lane_count == 16 and lane_idx >= 8:
+                            x = lane_x + 1 + lane_idx * 5 + 2
+                        else:
+                            x = lane_x + 1 + lane_idx * 5
+                        stdscr.addstr(y, x, note_str)
+                elif y >= judgement_y and not is_measure_line:
                     # 判定ライン通過時のフラッシュ演出
                     if current_time - target_seconds < 0.08:
                         if lane_count == 16 and lane_idx >= 8:
@@ -478,6 +522,8 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane):
                 player.is_playing = False
             elif key in key_to_lane:
                 if not auto_play:
+                    # Log key press with timestamp
+                    # log_event('key_pressed', f'key_code={key}')
                     player.press_key(key_to_lane[key])
                 
             stdscr.refresh()
@@ -533,11 +579,13 @@ def main(stdscr):
     
     # プレイオプションのデフォルトロード
     load_auto_scratch()
+    load_show_measure_lines()
     opt_autoplay = False
     opt_autoscratch = auto_scratch
     opt_mirror = False
     opt_random = False
     opt_easy = False
+    opt_show_measure_lines = show_measure_lines
     opt_scratch_side = scratch_side  # settings.toml からロードされた初期値 ("left" または "right")
     
     try:
@@ -550,6 +598,7 @@ def main(stdscr):
             opt_mirror = play_opts.get('mirror', False)
             opt_random = play_opts.get('random', False)
             opt_easy = play_opts.get('easy_mode', False)
+            opt_show_measure_lines = play_opts.get('show_measure_lines', True)
     except Exception:
         pass
 
@@ -570,12 +619,13 @@ def main(stdscr):
             stdscr.addstr(7, 2, f"  [M] MIRROR       : {'ON' if opt_mirror else 'OFF'}")
             stdscr.addstr(8, 2, f"  [R] RANDOM       : {'ON' if opt_random else 'OFF'}")
             stdscr.addstr(9, 2, f"  [E] EASY         : {'ON' if opt_easy else 'OFF'}")
+            stdscr.addstr(10, 2, f"  [O] SHOW MEASURES: {'ON' if opt_show_measure_lines else 'OFF'}")
             if not is_dp_mode:
-                stdscr.addstr(10, 2, f"  [L] SCRATCH SIDE : {opt_scratch_side.upper()}")
+                stdscr.addstr(11, 2, f"  [L] SCRATCH SIDE : {opt_scratch_side.upper()}")
             
-            stdscr.addstr(12, 2, "Press key [A/S/M/R/E" + ("" if is_dp_mode else "/L") + "] to toggle option.")
-            stdscr.addstr(14, 2, "Press [Enter] to START PLAY")
-            stdscr.addstr(15, 2, f"Press [{quit_key_name}] to Quit")
+            stdscr.addstr(13, 2, "Press key [A/S/M/R/E/O" + ("" if is_dp_mode else "/L") + "] to toggle option.")
+            stdscr.addstr(15, 2, "Press [Enter] to START PLAY")
+            stdscr.addstr(16, 2, f"Press [{quit_key_name}] to Quit")
         else:
             stdscr.addstr(2, 2, "Please specify a BMS file as an argument.")
             stdscr.addstr(3, 2, "Example: python3 main.py path/to/song.bms")
@@ -597,6 +647,8 @@ def main(stdscr):
                 opt_random = not opt_random
             elif key in (ord('e'), ord('E')):
                 opt_easy = not opt_easy
+            elif key in (ord('o'), ord('O')):
+                opt_show_measure_lines = not opt_show_measure_lines
             elif not is_dp_mode and key in (ord('l'), ord('L')):
                 opt_scratch_side = "right" if opt_scratch_side == "left" else "left"
             elif key in (10, 13):  # Enter key to start play
@@ -659,13 +711,14 @@ def main(stdscr):
                 
                 player.auto_scratch = opt_autoscratch
                 player.easy_mode = opt_easy
+                player.show_measure_lines = opt_show_measure_lines
                 player.judgement_offset_ms = judgement_offset_ms_config
                 
                 on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE)
                 player.play(on_update=on_update, auto_play=opt_autoplay)
                 running = False
         
-        time.sleep(0.05)        
+        time.sleep(0.05) #ここのsleepはメニュー画面での話なのでこれ(20FPS)で十分
     ae.close()
 
 if __name__ == "__main__":
