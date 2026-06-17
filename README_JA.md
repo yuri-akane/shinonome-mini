@@ -39,6 +39,7 @@ python3 main.py path/to/your_chart.bms
 - 起動後はフルスクリーンの curses UI が表示されます。
 - **Esc** キーで終了します。
 - キー設定は `settings.toml` で自由に変更可能です（デフォルトは `z s x d …` など）。
+- consoleなのでshiftキー押下が判別できず、そのためスクラッチはデフォルトでa,tab,spaceに割り当てています（変更可能です）。
 - 表示がおかしかったらterminalをfullscreenにしてください
 
 ## Configuration (`settings.toml`)
@@ -48,10 +49,13 @@ python3 main.py path/to/your_chart.bms
 - **judgement** – customize judgement line position and timing offset
 
 ## Notes & Caveats
-- The UI is terminal‑only; no graphical interface.
-- Only a subset of BMS commands are currently parsed. BMP (`01`) is kept for BGM, while background layers (BGA) and other visual commands are skipped.
-- STOP and BPM‑change commands are marked for future implementation.
-- Works best on Shift‑JIS encoded BMS files.
+- UI は端末だけの表示で、グラフィカル UI はありません。
+- 現在は一部 BMS コマンドのみ対応。BMP (`01`) は BGM として扱い、BGA 等はスキップします。
+- **BPM 変更** と **小節長変更** に対応しました。
+- **STOP**、**SCROLL** コマンドは未対応です。今後実装予定です。
+- `settings.toml` では **Shift / Ctrl / Alt** キーは割り当てできません。
+- Shift‑JIS エンコードの BMS ファイルでの動作を想定しています。
+- bmson 形式はまだ未対応です。
 
 ## ライセンス
 - GPLv3
@@ -61,17 +65,18 @@ python3 main.py path/to/your_chart.bms
 - 全く別物になっていますが、基本コンセプトをお借りしているので-miniとさせていただきました。
 
 ## あとでやる
+- スクラッチがrightかつrandomつけたときenbugしているのでdebug
 - bmson
 - ロングノート
-- STOP、BPM変更、SCROLL
-- 小節長変更
+- STOP、SCROLL
 - global変数使うな
+- debuglogファイル出力の扱い（リリースでは消すように工夫します）
 
 ## minimalに保つためやらない
 - 画像・動画表示
-- HS(hispeed)
+- HS(hispeed) -> 簡単そうなのでやるかも
 - hidden/sudden
-- スコア記録・保存・送信
-- プレイリスト（※別のプログラムではやる）
+- スコア記録・保存・送信。ファイル出力・オンライン接続。
+- プレイリスト -> ※別のプログラムであとでやる
 - 地雷ノーツ
 - #RANDOM〜#IF命令
