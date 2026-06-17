@@ -40,7 +40,7 @@ The player will launch a curses UI. Use the keys defined in `settings.toml` (def
 
 ## Notes & Caveats
 - The UI is terminal‑only; no graphical interface.
-- Only a subset of BMS commands are currently parsed. BMP (`01`) is kept for BGM, while background layers (BGA) and other visual commands are skipped.
+- Only a subset of BMS commands are currently parsed. BMP,BGA and other visual commands are skipped.
 - **STOP** and **SCROLL** commands are not yet supported.
 - Works best on Shift‑JIS encoded BMS files.
 - `settings.toml` does **not** allow assigning **Shift / Ctrl / Alt** keys.
