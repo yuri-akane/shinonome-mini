@@ -51,7 +51,6 @@ python3 main.py path/to/your_chart.bms
 ## Notes & Caveats
 - UI は端末だけの表示で、グラフィカル UI はありません。
 - 現在は一部 BMS コマンドのみ対応。BMP,BGA 等はスキップします。
-- **BPM 変更** と **小節長変更** に対応しました。
 - **SCROLL** コマンドは未対応です。今後実装予定です。
 - `settings.toml` では **Shift / Ctrl / Alt** キーは割り当てできません。
 - Shift‑JIS エンコードの BMS ファイルでの動作を想定しています。
