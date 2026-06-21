@@ -41,7 +41,7 @@ The player will launch a curses UI. Use the keys defined in `settings.toml` (def
 ## Notes & Caveats
 - The UI is terminal‑only; no graphical interface.
 - Only a subset of BMS commands are currently parsed. BMP,BGA and other visual commands are skipped.
-- **STOP** and **SCROLL** commands are not yet supported.
+- **SCROLL** commands are not yet supported.
 - Works best on Shift‑JIS encoded BMS files.
 - `settings.toml` does **not** allow assigning **Shift / Ctrl / Alt** keys.
 - bmson format is not yet supported.
@@ -54,4 +54,19 @@ The player will launch a curses UI. Use the keys defined in `settings.toml` (def
 - 全く別物になっていますが、基本コンセプトをお借りしているので-miniとさせていただきました。
 
 ## todo
-- bmson, longnote, STOP, SCROLL...
+- STOP (partially done, but buggy at some bms...)
+- bmson, longnote, SCROLL...
+- do not playback many-time with single #WAVxx definition
+
+## this program doesn't support:
+- movie or image (BMP,BGA)
+- HS(hispeed) ->(future support?)
+- hidden/sudden
+- score/file output
+- IR or network connection
+- playlists
+- #RANDOM - #IF
+- mine notes
+- invisible notes
+
+

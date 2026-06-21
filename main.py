@@ -2,311 +2,34 @@ import curses
 import time
 import sys
 import os
-#from latency_logger import log_event
 import tomllib
 from pathlib import Path
 from audio import AudioEngine
 from player import Player
-from config import load_key_to_lane as load_key_config
+from config import load_key_config, load_quit_key, load_scratch_side, load_judgement_config, load_auto_scratch, load_show_measure_lines
+import config
 import random
-
-quit_key_name = "esc"
-quit_key_code = 27
-scratch_side = "left"  # "left" or "right" (SP時のみ有効)
-
-# Global mapping from key codes to lane indices
-
-def load_quit_key(settings_path: str = "settings.toml") -> int:
-    """Load the quit key configuration from settings.toml.
-    Returns the integer key code. Supports single character strings and common names like "esc".
-    """
-    global quit_key_name
-    config_file = Path(__file__).parent / settings_path
-    if not config_file.is_file():
-        # Default to ESC if config missing
-        quit_key_name = "esc"
-        return 27
-    with config_file.open('rb') as f:
-        data = tomllib.load(f)
-    quit_cfg = data.get('quit', {})
-    key_val = quit_cfg.get('key', 'esc')
-    if isinstance(key_val, str):
-        key_val = key_val.lower()
-        if key_val == 'esc':
-            quit_key_name = "esc"
-            return 27
-        # If it's a single character, return its ord
-        if len(key_val) == 1:
-            quit_key_name = key_val
-            return ord(key_val)
-    # Fallback
-    quit_key_name = "esc"
-    return 27
-
-def load_scratch_side(settings_path: str = "settings.toml") -> str:
-    """settings.toml の [scratch] side を読み込む。
-    SP時のスクラッチ位置を "left" または "right" で返す。
-    """
-    global scratch_side
-    config_file = Path(__file__).parent / settings_path
-    if not config_file.is_file():
-        scratch_side = "left"
-        return scratch_side
-    try:
-        with config_file.open('rb') as f:
-            data = tomllib.load(f)
-        scratch_cfg = data.get('scratch', {})
-        side = scratch_cfg.get('side', 'left').lower()
-        scratch_side = side if side in ('left', 'right') else 'left'
-    except Exception:
-        scratch_side = "left"
-    return scratch_side
-
-judgement_y_config = 16
-judgement_offset_ms_config = 0
-
-def load_judgement_config(settings_path: str = "settings.toml") -> tuple[int, int]:
-    """settings.toml の [judgement] から judgement_y と judgement_offset_ms を読み込む。"""
-    global judgement_y_config, judgement_offset_ms_config
-    config_file = Path(__file__).parent / settings_path
-    if not config_file.is_file():
-        return 16, 0
-    try:
-        with config_file.open('rb') as f:
-            data = tomllib.load(f)
-        judg_cfg = data.get('judgement', {})
-        judgement_y_config = judg_cfg.get('judgement_y', 16)
-        judgement_offset_ms_config = judg_cfg.get('judgement_offset_ms', 0)
-    except Exception:
-        judgement_y_config = 16
-        judgement_offset_ms_config = 0
-    return judgement_y_config, judgement_offset_ms_config
-
-auto_scratch = False
-
-def load_auto_scratch(settings_path: str = "settings.toml") -> bool:
-    """settings.toml の [play_options] auto_scratch を読み込む。"""
-    global auto_scratch
-    config_file = Path(__file__).parent / settings_path
-    if not config_file.is_file():
-        auto_scratch = False
-        return auto_scratch
-    try:
-        with config_file.open('rb') as f:
-            data = tomllib.load(f)
-        play_opts = data.get('play_options', {})
-        auto_scratch = play_opts.get('auto_scratch', False)
-    except Exception:
-        auto_scratch = False
-    return auto_scratch
-
-show_measure_lines = True
-
-def load_show_measure_lines(settings_path: str = "settings.toml") -> bool:
-    """settings.toml の [play_options] show_measure_lines を読み込む。"""
-    global show_measure_lines
-    config_file = Path(__file__).parent / settings_path
-    if not config_file.is_file():
-        show_measure_lines = True
-        return show_measure_lines
-    try:
-        with config_file.open('rb') as f:
-            data = tomllib.load(f)
-        play_opts = data.get('play_options', {})
-        show_measure_lines = play_opts.get('show_measure_lines', True)
-    except Exception:
-        show_measure_lines = True
-    return show_measure_lines
-
-# レーンのインデックスマッピング (左スクラッチ用: デフォルト)
-CHANNEL_TO_LANE_LEFT = {
-    "16": 0,   # scratch (1P)
-    "17": 0,   # foot pedal (1P)
-    "11": 1,
-    "12": 2,
-    "13": 3,
-    "14": 4,
-    "15": 5,
-    "18": 6,
-    "19": 7,
-    "21": 8,   # scratch (2P)
-    "22": 9,
-    "23": 10,
-    "24": 11,
-    "25": 12,
-    "28": 13,
-    "29": 14,
-    "26": 15,  # right scratch (2P)
-    "27": 15   # right foot pedal (2P)
-}
-
-# レーンのインデックスマッピング (右スクラッチ用: SP時のみ)
-CHANNEL_TO_LANE_RIGHT = {
-    "11": 0,
-    "12": 1,
-    "13": 2,
-    "14": 3,
-    "15": 4,
-    "18": 5,
-    "19": 6,
-    "16": 7,   # scratch (1P) → 右端
-    "17": 7,   # foot pedal (1P) → 右端
-    "21": 8,   # scratch (2P)
-    "22": 9,
-    "23": 10,
-    "24": 11,
-    "25": 12,
-    "28": 13,
-    "29": 14,
-    "26": 15,
-    "27": 15
-}
-
-# 実行時に決定されるマッピング
-CHANNEL_TO_LANE = CHANNEL_TO_LANE_LEFT.copy()
-
-# プレイ用のキーボード配置 (デフォルト設定: 左スクラッチ)
-DEFAULT_KEY_TO_LANE_LEFT = {
-    # Player 1 (左スクラッチ)
-    ord(' '): 0,  # Space: Scratch (1P)
-    ord('a'): 0,  # a: Scratch (1P)
-    ord('z'): 1,
-    ord('s'): 2,
-    ord('x'): 3,
-    ord('d'): 4,
-    ord('c'): 5,
-    ord('f'): 6,
-    ord('v'): 7,
-    # Player 2
-    ord('j'): 8,
-    ord('k'): 9,
-    ord('l'): 10,
-    ord(';'): 11,
-    ord("'"): 12,
-    ord('n'): 13,
-    ord('m'): 14,
-    ord(','): 15,
-}
-
-# プレイ用のキーボード配置 (デフォルト設定: 右スクラッチ)
-DEFAULT_KEY_TO_LANE_RIGHT = {
-    # Player 1 (右スクラッチ: 鍵盤が0~6、スクラッチが7)
-    ord('z'): 0,
-    ord('s'): 1,
-    ord('x'): 2,
-    ord('d'): 3,
-    ord('c'): 4,
-    ord('f'): 5,
-    ord('v'): 6,
-    ord(' '): 7,  # Space: Scratch (1P) → 右端
-    ord('a'): 7,  # a: Scratch (1P) → 右端
-    # Player 2
-    ord('j'): 8,
-    ord('k'): 9,
-    ord('l'): 10,
-    ord(';'): 11,
-    ord("'"): 12,
-    ord('n'): 13,
-    ord('m'): 14,
-    ord(','): 15,
-}
-
-# Removed global KEY_TO_LANE placeholder
-
-def load_key_config(settings_path: str = "settings.toml") -> dict:
-    """Load the custom key configuration from settings.toml.
-    Returns a dict mapping integer key codes to lane indices.
-    scratch_side に応じてスクラッチキーのレーン割り当てを変更する。
-    """
-    is_right = (scratch_side == "right")
-    default_map = DEFAULT_KEY_TO_LANE_RIGHT if is_right else DEFAULT_KEY_TO_LANE_LEFT
-    scratch_lane = 7 if is_right else 0
-
-    config_file = Path(__file__).parent / settings_path
-    if not config_file.is_file():
-        return default_map.copy()
-
-    try:
-        with config_file.open('rb') as f:
-            data = tomllib.load(f)
-        keys_cfg = data.get('keys', {})
-        if not keys_cfg:
-            return default_map.copy()
-
-        new_map = {}
-
-        # 1P Scratch - side aware (scratch_1P or scratch_2P)
-        ls_key = 'scratch_2P' if is_right else 'scratch_1P'
-        ls = keys_cfg.get(ls_key, ["a", " ", "\t"])
-        if isinstance(ls, str):
-            ls = [ls]
-        for key_str in ls:
-            if len(key_str) == 1:
-                new_map[ord(key_str)] = scratch_lane
-            elif key_str == "\t":
-                new_map[9] = scratch_lane # ASCII Tab
-
-        # 1P Keys
-        if is_right:
-            # 右スクラッチ時: settings.tomlのlane0~lane6をインデックス0~6にマッピング
-            for i in range(7):
-                key_str = keys_cfg.get(f'lane{i}')
-                if key_str and len(key_str) == 1:
-                    new_map[ord(key_str)] = i
-        else:
-            # 左スクラッチ時: settings.tomlのlane0~lane6をインデックス1~7にマッピング
-            for i in range(7):
-                key_str = keys_cfg.get(f'lane{i}')
-                if key_str and len(key_str) == 1:
-                    new_map[ord(key_str)] = i + 1
-
-        # 2P Keys (lane7 ~ lane13 mapped to index 8 ~ 14)
-        for i in range(7, 14):
-            key_str = keys_cfg.get(f'lane{i}')
-            if key_str and len(key_str) == 1:
-                new_map[ord(key_str)] = i + 1
-
-        # 2P Scratch (scratch_2P) - can be a single key or a list
-        rs = keys_cfg.get('scratch_2P', ["", "\n"])
-        if isinstance(rs, str):
-            rs = [rs]
-        for key_str in rs:
-            if len(key_str) == 1:
-                new_map[ord(key_str)] = 15
-            elif key_str == "\n":
-                new_map[10] = 15 # ASCII LF / Enter
-                new_map[13] = 15 # ASCII CR / Enter
-
-        return new_map if new_map else default_map.copy()
-    except Exception:
-        return default_map.copy()
+from constants import (
+    CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT,
+    LANE_CHARS_LEFT, LANE_CHARS_RIGHT,
+    KEY_NAMES_DP, KEY_NAMES_RIGHT, KEY_NAMES_LEFT
+)
 
 # レーンごとのノーツ表現
 # 左スクラッチ時: 0=S, 1~7=鍵盤(白黒白黒...)
 # 右スクラッチ時: 0~6=鍵盤(白黒白黒...), 7=S
-LANE_CHARS_LEFT = {
-    0: "XX", 
-    1: "[]", 2: "::", 3: "[]", 4: "::", 5: "[]", 6: "::", 7: "[]",
-    8: "[]", 9: "::", 10: "[]", 11: "::", 12: "[]", 13: "::", 14: "[]",
-    15: "XX",
-}
-LANE_CHARS_RIGHT = {
-    0: "[]", 1: "::", 2: "[]", 3: "::", 4: "[]", 5: "::", 6: "[]",
-    7: "XX",
-    8: "[]", 9: "::", 10: "[]", 11: "::", 12: "[]", 13: "::", 14: "[]",
-    15: "XX",
-}
 LANE_CHARS = LANE_CHARS_LEFT.copy()
 
-def make_on_update(stdscr, player, quit_key_code, key_to_lane):
-    
+
+def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_config):
+
     def on_update(current_time, events, event_index, initial_bpm, resolution, auto_play):
         try:
             stdscr.erase()
-            
+
             # 画面サイズの確認 (DP時に統計情報を下げたため、必要なYサイズを拡張)
             max_y, max_x = stdscr.getmaxyx()
-            # DP時は start_y + 15 + 10 = 29行程度必要になるため、少し余裕を持って required_y = 32 とします。
+            # DP時は start_y + 15 + 10 = 29行程度必要、少し余裕を持って required_y = 32 とします。
             is_dp = (player.chart.get('mode', 'SP') == 'DP')
             required_y = 32 if is_dp else 22
             required_x = 100 if is_dp else 70
@@ -314,14 +37,13 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane):
                 stdscr.addstr(0, 2, "=== TERMINAL SIZE TOO SMALL ===", curses.A_BOLD)
                 stdscr.addstr(2, 2, f"Required size: {required_x} cols x {required_y} rows")
                 stdscr.addstr(3, 2, f"Current size : {max_x} cols x {max_y} rows")
-                
-            
+
             # 判定ラインとレーンの描画設定
             judgement_y = judgement_y_config
             start_y = 4
             lane_x = 4
             speed = 22.0 # 1秒あたりに進む行数
-            
+
             if getattr(player, 'timeline', None):
                 beat_duration = 60.0 / player.initial_bpm
                 scale = speed * beat_duration
@@ -336,7 +58,7 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane):
             title = player.chart['info'].get('title', 'Unknown')
             stdscr.addstr(1, 2, f"Song: {title} / {player.chart['info'].get('artist', 'Unknown')}")
             stdscr.addstr(2, 2, f"BPM: {current_bpm:.1f} | Time: {current_time:.2f}s")
-            
+
             # Compute lane count based on mode
             lane_count = 16 if player.chart.get('mode', 'SP') == 'DP' else 8
             # Draw vertical lane borders (including rightmost bar)
@@ -350,24 +72,15 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane):
                 stdscr.addstr(judgement_y, lane_x, "+" + "----+" * 8 + " " + "+" + "----+" * 8)
             else:
                 stdscr.addstr(judgement_y, lane_x, "+" + "----+" * lane_count)
-            
+
             # Individual key rendering with highlight
             if player.chart.get('mode', 'SP') == 'DP':
-                key_names = [
-                    "[S1]", "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]",
-                    "[8]", "[9]", "[10]", "[11]", "[12]", "[13]", "[14]", "[S2]"
-                ]
-            elif scratch_side == "right":
-                key_names = [
-                    "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[S]"
-                ]
+                key_names = KEY_NAMES_DP
+            elif config.scratch_side == "right":
+                key_names = KEY_NAMES_RIGHT
             else:
-                key_names = [
-                    "[S]", "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]"
-                ]
+                key_names = KEY_NAMES_LEFT
             
-            # Duplicate rendering block removed - cleaned up
-
             for idx, name in enumerate(key_names):
                 # Determine which lane index to check for a press.
                 lane_idx = idx  # Since lane_to_key_idx maps 1:1, we can use idx directly.
@@ -385,7 +98,7 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane):
             else:
                 stdscr.addstr(judgement_y + 2, lane_x, "[       MANUAL PLAY ACTIVE         ]")
                 
-            stdscr.addstr(judgement_y + 4, lane_x, f"Press {quit_key_name} to quit playing")
+            stdscr.addstr(judgement_y + 4, lane_x, f"Press {config.quit_key_name} to quit playing")
             
             # DP stats positioning: place closer to judgement line to reduce empty space
             if player.chart.get('mode', 'SP') == 'DP':
@@ -522,19 +235,15 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane):
                 player.is_playing = False
             elif key in key_to_lane:
                 if not auto_play:
-                    # Log key press with timestamp
-                    # log_event('key_pressed', f'key_code={key}')
                     player.press_key(key_to_lane[key])
                 
             stdscr.refresh()
         except curses.error:
             pass
     return on_update
-# stray triple-quote removed
 
 def main(stdscr):
     # Some terminals may not support cursor visibility changes; ignore errors
-    global scratch_side
     global LANE_CHARS
 
     try:
@@ -555,7 +264,7 @@ def main(stdscr):
             stdscr.addstr(4, 2, f"Loaded: {player.chart['info']['title']}")
             stdscr.addstr(6, 2, "Press 'p' to start MANUAL PLAY")
             stdscr.addstr(7, 2, "Press 'a' to start AUTOPLAY")
-            stdscr.addstr(9, 2, f"Press '{quit_key_name}' to quit")
+            stdscr.addstr(9, 2, f"Press '{config.quit_key_name}' to quit")
         except Exception as e:
             stdscr.addstr(4, 2, f"Error: {e}")
     else:
@@ -563,30 +272,28 @@ def main(stdscr):
         stdscr.addstr(5, 2, "Example: python3 main.py path/to/song.bms")
 
 
-    scratch_side = load_scratch_side()
+    config.scratch_side = load_scratch_side()
     # SP時にスクラッチ位置に応じてマッピングを切替 (DPは常に左右固定)
-    if player.chart and player.chart.get('mode', 'SP') == 'SP' and scratch_side == "right":
+    if player.chart and player.chart.get('mode', 'SP') == 'SP' and config.scratch_side == "right":
         channel_to_lane = CHANNEL_TO_LANE_RIGHT.copy()
         LANE_CHARS = LANE_CHARS_RIGHT.copy()
     else:
         channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
         LANE_CHARS = LANE_CHARS_LEFT.copy()
     # Sync player mapping
-    player.channel_to_lane = channel_to_lane
-    KEY_TO_LANE = load_key_config()
+    is_dp = (player.chart.get('mode', 'SP') == 'DP') if player.chart else False
+    KEY_TO_LANE = load_key_config(is_dp=is_dp)
     quit_key_code = load_quit_key()
-    load_judgement_config()
+    judgement_y_config, judgement_offset_ms_config = load_judgement_config()
     
     # プレイオプションのデフォルトロード
-    load_auto_scratch()
-    load_show_measure_lines()
     opt_autoplay = False
-    opt_autoscratch = auto_scratch
+    opt_autoscratch = load_auto_scratch()
     opt_mirror = False
     opt_random = False
     opt_easy = False
-    opt_show_measure_lines = show_measure_lines
-    opt_scratch_side = scratch_side  # settings.toml からロードされた初期値 ("left" または "right")
+    opt_show_measure_lines = True
+    opt_scratch_side = config.scratch_side  # settings.toml からロードされた初期値 ("left" または "right")
     
     try:
         config_file = Path(__file__).parent / "settings.toml"
@@ -625,11 +332,11 @@ def main(stdscr):
             
             stdscr.addstr(13, 2, "Press key [A/S/M/R/E/O" + ("" if is_dp_mode else "/L") + "] to toggle option.")
             stdscr.addstr(15, 2, "Press [Enter] to START PLAY")
-            stdscr.addstr(16, 2, f"Press [{quit_key_name}] to Quit")
+            stdscr.addstr(16, 2, f"Press [{config.quit_key_name}] to Quit")
         else:
             stdscr.addstr(2, 2, "Please specify a BMS file as an argument.")
             stdscr.addstr(3, 2, "Example: python3 main.py path/to/song.bms")
-            stdscr.addstr(5, 2, f"Press [{quit_key_name}] to Quit")
+            stdscr.addstr(5, 2, f"Press [{config.quit_key_name}] to Quit")
 
         stdscr.refresh()
         
@@ -653,17 +360,17 @@ def main(stdscr):
                 opt_scratch_side = "right" if opt_scratch_side == "left" else "left"
             elif key in (10, 13):  # Enter key to start play
                 # 決定されたスクラッチサイドに合わせて、キー構成とチャンネルマッピングを再生成する
-                scratch_side = opt_scratch_side
+                config.scratch_side = opt_scratch_side
                 
                 # Determine initial lane mapping based on scratch side
-                if not is_dp_mode and scratch_side == "right":
+                if not is_dp_mode and config.scratch_side == "right":
                     channel_to_lane = CHANNEL_TO_LANE_RIGHT.copy()
                     LANE_CHARS = LANE_CHARS_RIGHT.copy()
                 else:
                     channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
                     LANE_CHARS = LANE_CHARS_LEFT.copy()
                 # Recompute keyboard-to-lane mapping to match the selected scratch side
-                KEY_TO_LANE = load_key_config()
+                KEY_TO_LANE = load_key_config(is_dp=is_dp_mode)
                 # Sync player mapping
                 player.channel_to_lane = channel_to_lane
 
@@ -672,7 +379,7 @@ def main(stdscr):
                 if player.chart.get('mode', 'SP') == 'DP':
                     scratch_lanes = {0, max_lane}
                 else:
-                    scratch_lanes = {7} if scratch_side == "right" else {0}
+                    scratch_lanes = {7} if config.scratch_side == "right" else {0}
                 key_lanes = [i for i in range(max_lane + 1) if i not in scratch_lanes]
                 lane_map = {}
                 if opt_random:
@@ -706,15 +413,13 @@ def main(stdscr):
                 # Synchronize Player mapping after lane remap
                 player.channel_to_lane = channel_to_lane
                 # KEY_TO_LANE (keyboard input) remains unchanged to preserve key positions and highlights
-
-
                 
                 player.auto_scratch = opt_autoscratch
                 player.easy_mode = opt_easy
                 player.show_measure_lines = opt_show_measure_lines
                 player.judgement_offset_ms = judgement_offset_ms_config
                 
-                on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE)
+                on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE, judgement_y_config)
                 player.play(on_update=on_update, auto_play=opt_autoplay)
                 running = False
         

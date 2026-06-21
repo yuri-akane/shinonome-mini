@@ -1,12 +1,14 @@
-# settings.toml – configuration for Shinonome Mini ver2.00
+# settings.toml – configuration for Shinonome Mini ver1.33
 
 [scratch]
 side="left" #"left" or "right"
 
 # キーマッピング
 [keys]
-# 左スクラッチはa, space, tab（コンソールではshiftやctrl等が効かないため）
-left_scratch   = ["a", " ", "\t"]
+# 左スクラッチ（SP時左）
+scratch_SP_left   = [" ", "a", "\t"]
+# 右スクラッチ（SP時右）
+scratch_SP_right  = ["b", "g", " "]
 lane0          = "z"
 lane1          = "s"
 lane2          = "x"
@@ -22,8 +24,10 @@ lane11         = "/"
 lane12         = ":"
 # \（バックスラッシュや円記号）はエスケープして\\としてください。（\tや\nと同様です）
 lane13         = "\\"
-# 右スクラッチは], enter
-right_scratch  = ["]", "\n"]
+# 左スクラッチ（DP時左）
+scratch_DP_left   = [" ", "a", "\t"]
+# 右スクラッチ（DP時右）
+scratch_DP_right  = ["[","]", "\n"]
 
 # プレイオプション (各モードは bool で切り替え)
 [play_options]
@@ -37,6 +41,7 @@ show_measure_lines = true # 小節線の表示ON/OFF
 # quit key configuration
 [quit]
 key = "esc"
+#key = "q"
 
 # 判定位置・タイミング調整の設定
 [judgement]

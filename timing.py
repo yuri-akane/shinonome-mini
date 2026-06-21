@@ -106,8 +106,8 @@ class BpmTimeline:
                 if b_end in bpm_map:
                     curr_bpm = bpm_map[b_end]
                 stop_val = stop_map[b_end]
-                # STOP duration (seconds) = (STOP値 / 192) * (60.0 / 現在のBPM)
-                stop_time = (stop_val / 192.0) * (60.0 / curr_bpm)
+                # STOP duration (seconds) = (STOP値 / 192) * (240 / 現在のBPM)
+                stop_time = (stop_val / 192.0) * (240.0 / curr_bpm)
                 
                 stop_seg = TimelineSegment(
                     start_time=curr_time,
@@ -172,7 +172,7 @@ class BpmTimeline:
         seg = self.segments[idx]
         
         if seg.is_stop:
-            return seg.start_beat, seg.start_height, seg.bpm, seg.multiplier
+            return seg.start_beat, seg.start_height, 0.0, seg.multiplier
             
         # Linear interpolation
         duration = seg.end_time - seg.start_time

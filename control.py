@@ -44,7 +44,7 @@ def process_control_event(player: Any, event: dict, auto_play: bool) -> bool:
     """Dispatch a control event.
 
     Returns ``True`` if the event was handled (i.e. it was a BPM or measure
-    change).  ``auto_play`` is passed through so the function signature mirrors
+    change or STOP command).  ``auto_play`` is passed through so the function signature mirrors
     the original inline logic – callers can ignore it if they wish.
     """
     if "bpm" in event:
@@ -52,5 +52,7 @@ def process_control_event(player: Any, event: dict, auto_play: bool) -> bool:
         return True
     if event.get("channel") == "02" and "measure_mult" in event:
         apply_measure_multiplier(player, event)
+        return True
+    if "stop" in event or event.get("channel") == "09":
         return True
     return False

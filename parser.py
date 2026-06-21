@@ -4,6 +4,7 @@ import re
 
 from typing import Dict, List, Tuple, Any
 import logging
+from constants import CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT
 
 class BmsParser:
     """Parse BMS files into a structured chart representation.
@@ -91,7 +92,7 @@ class BmsParser:
         info = {
             'title': '',
             'artist': '',
-            'bpm': 120.0,
+            'bpm': 130.0,
             'rank': 3,
             'total': None,
             'bpm_table': {},
@@ -120,10 +121,6 @@ class BmsParser:
                     self._parse_data(line, measures_multiplier, raw_data)
                 # otherwise ignore line
 
-        # Debug: after parsing, log raw_data count
-        # import logging
-# logging.debug(f"Raw data entries: {len(raw_data)}")
-        # End of file processing; compute measure beats
         current_beat = 0.0
         measure_beats = [0.0] * 1000
         for i in range(1000):
@@ -132,8 +129,6 @@ class BmsParser:
 
         # 拍単位での各イベントの beat 値の算出
         events = []
-        # Debug: before building events, note raw_data count
-# logging.debug(f"Building events from {len(raw_data)} raw data entries")
         for measure, channel, data_str in raw_data:
             objects = [data_str[i:i+2] for i in range(0, len(data_str), 2)]
             n = len(objects)
@@ -201,12 +196,12 @@ class BmsParser:
             })
 
         # beat順およびチャンネルプライオリティ順にソートする
-        # BPM変更やSTOPなどの制御イベントは、同じbeatにある音符イベントよりも先に評価されるべき
+        # BPM変更は同じbeatにある音符より先に評価し、STOPは音符が再生された後に停止するため音符より後に評価するべき
         def get_event_priority(ev):
             ch = ev.get('channel', 'XX')
             if ch in ("03", "08"): return 0  # BPM change first
-            if ch == "09": return 1          # STOP second
             if ch == "measure_line": return 1.5
+            if ch == "09": return 3          # STOP last (after note channels at 2)
             return 2                         # Notes / Sound channels last
 
         events.sort(key=lambda x: (x['beat'], get_event_priority(x)))
@@ -229,8 +224,8 @@ class BmsParser:
                 current_bpm = ev['bpm']
             if 'stop' in ev:
                 # STOP時間は 192分の1拍 を 1 とする。
-                # 停止時間（秒） = (STOP値 / 192) * (60.0 / 現在のBPM)
-                stop_sec = (ev['stop'] / 192.0) * (60.0 / current_bpm)
+                # 停止時間（秒） = (STOP値 / 192) * (240 / 現在のBPM)
+                stop_sec = (ev['stop'] / 192.0) * (240.0 / current_bpm)
                 current_sec += stop_sec
                 
             prev_beat = ev_beat
@@ -271,47 +266,6 @@ class BmsParser:
 
         # Generate default channel_to_lane mapping based on mode and scratch side (default left)
         mode = info.get('mode', 'SP')
-        # Left scratch mapping (default)
-        CHANNEL_TO_LANE_LEFT = {
-            "16": 0,   # scratch (1P)
-            "17": 0,   # foot pedal (1P)
-            "11": 1,
-            "12": 2,
-            "13": 3,
-            "14": 4,
-            "15": 5,
-            "18": 6,
-            "19": 7,
-            "21": 8,   # scratch (2P)
-            "22": 9,
-            "23": 10,
-            "24": 11,
-            "25": 12,
-            "28": 13,
-            "29": 14,
-            "26": 15,  # right scratch (2P)
-            "27": 15   # right foot pedal (2P)
-        }
-        CHANNEL_TO_LANE_RIGHT = {
-            "11": 0,
-            "12": 1,
-            "13": 2,
-            "14": 3,
-            "15": 4,
-            "18": 5,
-            "19": 6,
-            "16": 7,   # scratch (1P) → 右端
-            "17": 7,   # foot pedal (1P) → 右端
-            "21": 8,   # scratch (2P)
-            "22": 9,
-            "23": 10,
-            "24": 11,
-            "25": 12,
-            "28": 13,
-            "29": 14,
-            "26": 15,
-            "27": 15
-        }
         # Choose mapping based on mode and default scratch side (left for SP)
         if mode == 'DP':
             # DP uses left mapping for both players (as in main)
@@ -322,7 +276,6 @@ class BmsParser:
         
         # Attach to chart result
         chart_channel_to_lane = channel_to_lane
-
 
         return {
             'info': info,
@@ -351,7 +304,7 @@ class BmsonParser:
         song_info = {
             'title': info.get('title', 'Unknown'),
             'artist': info.get('artist', 'Unknown'),
-            'bpm': info.get('init_bpm', 120.0),
+            'bpm': info.get('init_bpm', 130.0),
         }
 
         # 音源とイベントの抽出
