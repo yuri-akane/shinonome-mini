@@ -21,7 +21,7 @@ from constants import (
 LANE_CHARS = LANE_CHARS_LEFT.copy()
 
 
-def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_config):
+def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_config, settings):
 
     def on_update(current_time, events, event_index, initial_bpm, resolution, auto_play):
         try:
@@ -42,7 +42,8 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
             judgement_y = judgement_y_config
             start_y = 4
             lane_x = 4
-            speed = 22.0 # 1秒あたりに進む行数
+            base_speed = 22.0  # 1秒あたりに進む行数 (base)
+            speed = base_speed * settings.get('hispeed', 1.0)  # Apply hispeed multiplier
 
             if getattr(player, 'timeline', None):
                 beat_duration = 60.0 / player.initial_bpm
@@ -58,6 +59,7 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
             title = player.chart['info'].get('title', 'Unknown')
             stdscr.addstr(1, 2, f"Song: {title} / {player.chart['info'].get('artist', 'Unknown')}")
             stdscr.addstr(2, 2, f"BPM: {current_bpm:.1f} | Time: {current_time:.2f}s")
+            stdscr.addstr(3, 2, f"HS: {settings.get('hispeed', 1.0):.1f}")
 
             # Compute lane count based on mode
             lane_count = 16 if player.chart.get('mode', 'SP') == 'DP' else 8
@@ -236,7 +238,10 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
             elif key in key_to_lane:
                 if not auto_play:
                     player.press_key(key_to_lane[key])
-                
+            elif key == ord('+'):
+                settings['hispeed'] = min(settings.get('hispeed', 1.0) + 0.2, 10.0)
+            elif key == ord('-'):
+                settings['hispeed'] = max(settings.get('hispeed', 1.0) - 0.2, 0.2)
             stdscr.refresh()
         except curses.error:
             pass
@@ -294,7 +299,6 @@ def main(stdscr):
     opt_easy = False
     opt_show_measure_lines = True
     opt_scratch_side = config.scratch_side  # settings.toml からロードされた初期値 ("left" または "right")
-    
     try:
         config_file = Path(__file__).parent / "settings.toml"
         if config_file.is_file():
@@ -306,8 +310,10 @@ def main(stdscr):
             opt_random = play_opts.get('random', False)
             opt_easy = play_opts.get('easy_mode', False)
             opt_show_measure_lines = play_opts.get('show_measure_lines', True)
+            opt_hispeed = play_opts.get('hispeed', 1.0)  # Read hispeed from settings
     except Exception:
-        pass
+        opt_hispeed = 1.0  # Fallback default
+
 
     running = True
     while running:
@@ -327,8 +333,9 @@ def main(stdscr):
             stdscr.addstr(8, 2, f"  [R] RANDOM       : {'ON' if opt_random else 'OFF'}")
             stdscr.addstr(9, 2, f"  [E] EASY         : {'ON' if opt_easy else 'OFF'}")
             stdscr.addstr(10, 2, f"  [O] SHOW MEASURES: {'ON' if opt_show_measure_lines else 'OFF'}")
+            stdscr.addstr(11, 2, f"  [+/-] HS (Hispeed) : {opt_hispeed:.1f}")
             if not is_dp_mode:
-                stdscr.addstr(11, 2, f"  [L] SCRATCH SIDE : {opt_scratch_side.upper()}")
+                stdscr.addstr(12, 2, f"  [L] SCRATCH SIDE : {opt_scratch_side.upper()}")
             
             stdscr.addstr(13, 2, "Press key [A/S/M/R/E/O" + ("" if is_dp_mode else "/L") + "] to toggle option.")
             stdscr.addstr(15, 2, "Press [Enter] to START PLAY")
@@ -356,6 +363,10 @@ def main(stdscr):
                 opt_easy = not opt_easy
             elif key in (ord('o'), ord('O')):
                 opt_show_measure_lines = not opt_show_measure_lines
+            elif key == ord('+'):
+                opt_hispeed = min(opt_hispeed + 0.2, 10.0)
+            elif key == ord('-'):
+                opt_hispeed = max(opt_hispeed - 0.2, 0.2)
             elif not is_dp_mode and key in (ord('l'), ord('L')):
                 opt_scratch_side = "right" if opt_scratch_side == "left" else "left"
             elif key in (10, 13):  # Enter key to start play
@@ -419,7 +430,9 @@ def main(stdscr):
                 player.show_measure_lines = opt_show_measure_lines
                 player.judgement_offset_ms = judgement_offset_ms_config
                 
-                on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE, judgement_y_config)
+                # Pass mutable settings dict to on_update for runtime hispeed changes
+                settings = {'hispeed': opt_hispeed}
+                on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE, judgement_y_config, settings)
                 player.play(on_update=on_update, auto_play=opt_autoplay)
                 running = False
         

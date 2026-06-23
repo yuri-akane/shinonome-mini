@@ -1,4 +1,4 @@
-# settings.toml – configuration for Shinonome Mini ver1.33
+# settings.toml – configuration for Shinonome Mini ver1.35
 
 [scratch]
 side="left" #"left" or "right"
@@ -37,6 +37,7 @@ random        = false  # ランダムノート配置
 auto_scratch  = false  # オートスクラッチ (自動 Scratch)
 easy_mode     = false  # イージーモード (ゲージ増減抑制/判定緩和)
 show_measure_lines = true # 小節線の表示ON/OFF
+hispeed = 1.2
 
 # quit key configuration
 [quit]
@@ -46,4 +47,4 @@ key = "esc"
 # 判定位置・タイミング調整の設定
 [judgement]
 judgement_y = 20          # 判定ラインの画面行位置（デフォルト: 16）
-judgement_offset_ms = 10   # 判定タイミングのオフセット（ミリ秒、正の値で判定ライン到達より遅れて判定）
+judgement_offset_ms = 0   # 判定タイミングのオフセット（ミリ秒、正の値で判定ライン到達より遅れて判定）

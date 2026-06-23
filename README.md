@@ -60,7 +60,6 @@ The player will launch a curses UI. Use the keys defined in `settings.toml` (def
 
 ## this program doesn't support:
 - movie or image (BMP,BGA)
-- HS(hispeed) ->(future support?)
 - hidden/sudden
 - score/file output
 - IR or network connection

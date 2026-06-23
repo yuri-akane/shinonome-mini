@@ -75,7 +75,6 @@ python3 main.py path/to/your_chart.bms
 
 ## minimalに保つためやらない
 - 画像・動画表示
-- HS(hispeed) -> 簡単そうなのでやるかも
 - hidden/sudden
 - スコア記録・保存・送信
 - ファイル出力（debug用コードはversionによって残っている場合があります）
