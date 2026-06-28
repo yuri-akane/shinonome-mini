@@ -50,8 +50,8 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
             stdscr.addstr(0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
             title = player.chart['info'].get('title', 'Unknown')
             stdscr.addstr(1, 2, f"Song: {title} / {player.chart['info'].get('artist', 'Unknown')}")
-            stdscr.addstr(2, 2, f"BPM: {current_bpm:.1f} | Time: {current_time:.2f}s")
-            stdscr.addstr(3, 2, f"HS: {settings.get('hispeed', 1.0):.1f}")
+            stdscr.addstr(2, 2, f"BPM: {current_bpm:.1f} | Time: {current_time:.2f}s | HS: {settings.get('hispeed', 1.0):.1f}")
+            #stdscr.addstr(3, 2, f"HS: {settings.get('hispeed', 1.0):.1f}")
 
             lane_count = 16 if player.chart.get('mode', 'SP') == 'DP' else 8
             for y in range(start_y, judgement_y):
@@ -66,7 +66,7 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
 
             if player.chart.get('mode', 'SP') == 'DP':
                 key_names = KEY_NAMES_DP
-            elif config.scratch_side == "right":
+            elif settings['opt_scratch_side'] == "right":
                 key_names = KEY_NAMES_RIGHT
             else:
                 key_names = KEY_NAMES_LEFT
@@ -132,6 +132,43 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                 stdscr.addstr(judgement_y + 6, lane_x + 12, j_str, attr)
                 if player.combo >= 3 and player.last_judgement in ["PERFECT", "GREAT", "GOOD"]:
                     stdscr.addstr(judgement_y + 7, lane_x + 14, f"{player.combo} COMBO", curses.A_BOLD)
+
+            # Draw long note bodies first
+            for i in range(event_index, len(events)):
+                event = events[i]
+                if event.get('state', 0) != 0:
+                    continue
+                channel = event.get('channel')
+                if not channel or channel not in player.channel_to_lane:
+                    continue
+                if event.get('ln_state') == 'end':
+                    start_ev = event.get('ln_partner')
+                    if start_ev:
+                        lane_idx = player.channel_to_lane[channel]
+                        if lane_count == 16 and lane_idx >= 8:
+                            x = lane_x + 1 + lane_idx * 5 + 2
+                        else:
+                            x = lane_x + 1 + lane_idx * 5
+                        
+                        target_seconds_end = event['time']
+                        if getattr(player, 'timeline', None):
+                            note_height_end = player.timeline.get_height_at_beat(event['beat'])
+                        else:
+                            note_height_end = target_seconds_end
+                        y_end = judgement_y - int((note_height_end - player_height) * scale)
+                        
+                        if start_ev.get('state', 0) == 1:
+                            y_start = judgement_y
+                        else:
+                            target_seconds_start = start_ev['time']
+                            if getattr(player, 'timeline', None):
+                                note_height_start = player.timeline.get_height_at_beat(start_ev['beat'])
+                            else:
+                                note_height_start = target_seconds_start
+                            y_start = judgement_y - int((note_height_start - player_height) * scale)
+                        
+                        for y_body in range(max(start_y, y_end + 1), min(judgement_y, y_start)):
+                            stdscr.addstr(y_body, x, " |")
 
             for i in range(event_index, len(events)):
                 event = events[i]

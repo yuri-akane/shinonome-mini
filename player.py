@@ -9,7 +9,6 @@ class Player:
         self.audio = audio_engine
         self.channel_to_lane = channel_to_lane
         self.debug = False
-        #self.log_path = os.path.join(os.path.dirname(__file__), 'player_debug.log')
         self.chart = None
         self.is_playing = False
         self.start_time = 0
@@ -32,16 +31,9 @@ class Player:
         self.bad_count = 0
         self.miss_count = 0
         self.total_playable_notes = 0  # 総プレイノーツ数
-
-    # def _debug_log(self, msg: str):
-    #     """Write debug message to log file if debugging is enabled."""
-    #     if not getattr(self, 'debug', False):
-    #         return
-    #     try:
-    #         with open(self.log_path, 'a', encoding='utf-8') as f:
-    #             f.write(msg + '\n')
-    #     except Exception:
-    #         pass
+        self.active_lns = {}  # lane_index -> start_event
+        self.last_key_press_time = [0.0] * 16
+        self.last_any_key_press_time = 0.0
 
     def _init_event_state(self):
         """Initialize event flags and count playable notes.
@@ -54,6 +46,8 @@ class Player:
             event['is_playable'] = channel in self.channel_to_lane
             event['state'] = 0  # 0: PENDING, 1: HIT (or BGM processed), 2: MISS
             if event['is_playable']:
+                if event.get('ln_state') == 'end':
+                    continue
                 self.total_playable_notes += 1
 
     def apply_measure_change(self, event):
@@ -149,16 +143,15 @@ class Player:
 
     def get_gauge_increment(self):
         """#TOTAL命令に基づき、ノーツ1つあたりのゲージ増加量を動的計算する"""
-        # デフォルトの合計ゲージ量TOTALは 160 + 0.16 * 総ノーツ数
         total_playable = max(1, self.total_playable_notes)
-        default_total = 160.0 + 0.16 * total_playable
         total = self.chart['info'].get('total') if self.chart else None
-        if total is None:
-            total = default_total
+
+        if total is None: #parserで処理できてればそもそもここに来ないはずだが…
+            from timing import estimated_total
+            total = estimated_total(total_playable)
 
         # PERFECT/GREAT時の増加量 (総ノーツを全てPERFECT/GREATで叩いたときにTOTAL%増えるようにする)
-        inc = float(total) / total_playable
-        return inc
+        return float(total) / total_playable
 
     def press_key(self, lane_index):
         """プレイヤーがキーを押したときの判定処理"""
@@ -169,14 +162,24 @@ class Player:
 
         # 打鍵時間を記録 (演出用)
         self.key_pressed_time[lane_index] = current_time
+        self.last_key_press_time[lane_index] = current_time
+
+        # もし該当レーンでロングノートがアクティブ（押しっぱなし中）なら、リピート入力は無視する
+        if lane_index in self.active_lns:
+            return
+
+        self.last_any_key_press_time = current_time
 
         events = self.chart['events']
         initial_bpm = self.chart['info']['bpm']
 
         # 該当レーンの未処理（state == 0）のプレイノーツを探す
+        # ただし、ロングノートの終端は press_key で直接叩くものではないため除外する
         playable_events = []
         for event in events:
             if event['state'] == 0 and event['is_playable']:
+                if event.get('ln_state') == 'end':
+                    continue
                 channel = event.get('channel')
                 if self.channel_to_lane.get(channel) == lane_index:
                     playable_events.append(event)
@@ -212,6 +215,7 @@ class Player:
             # イージーモード時はゲージ減少量を半分にする
             loss_factor = 0.5 if getattr(self, 'easy_mode', False) else 1.0
 
+            is_hit = False
             # 判定文字・スコア・ゲージ・コンボの割り当て
             if adjusted_diff <= perf_w:
                 self.last_judgement = "PERFECT"
@@ -219,22 +223,29 @@ class Player:
                 self.perfect_count += 1
                 self.combo += 1
                 self.gauge = min(100.0, self.gauge + inc)
+                is_hit = True
             elif adjusted_diff <= great_w:
                 self.last_judgement = "GREAT"
                 self.ex_score += 1
                 self.great_count += 1
                 self.combo += 1
                 self.gauge = min(100.0, self.gauge + inc)
+                is_hit = True
             elif adjusted_diff <= good_w:
                 self.last_judgement = "GOOD"
                 self.good_count += 1
                 self.combo += 1
                 self.gauge = min(100.0, self.gauge + (inc * 0.5))
+                is_hit = True
             else:
                 self.last_judgement = "BAD"
                 self.bad_count += 1
                 self.combo = 0
                 self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
+
+            # ロングノートの始点ノーツを正しく叩けた場合、アクティブにする
+            if is_hit and best_event.get('ln_state') == 'start':
+                self.active_lns[lane_index] = best_event
 
             self.max_combo = max(self.max_combo, self.combo)
             self.judgement_time = current_time
@@ -247,6 +258,8 @@ class Player:
         self.last_judgement = ""
         self.judgement_time = 0
         self.key_pressed_time = [0.0] * 16
+        self.last_key_press_time = [0.0] * 16
+        self.active_lns.clear()
 
         # 統計情報の初期化
         self.gauge = 22.0
@@ -311,9 +324,9 @@ class Player:
                         is_scratch = False
                         if lane_idx is not None:
                             if is_dp:
-                                is_scratch = (lane_idx in (0, 15))
+                                    is_scratch = (lane_idx in (0, 15))
                             else:
-                                is_scratch = (channel == "16" or lane_idx == 0)
+                                    is_scratch = (channel == "16" or lane_idx == 0)
 
                         if auto_play or (self.auto_scratch and is_scratch):
                             self.audio.play(event['sound_id'])
@@ -322,6 +335,45 @@ class Player:
                     continue
                 else:
                     break
+
+            # ManualPlay時の押しっぱなし判定 (ロングノート)
+            if not auto_play:
+                loss_factor = 0.5 if getattr(self, 'easy_mode', False) else 1.0
+                for lane_idx, start_ev in list(self.active_lns.items()):
+                    ### fixme: 以下の処理は、「シンプルなキー入力判定」をしているために起こっている。
+                    ### キーリピートに依存している以上、他のキーが押されると必ず途切れる。
+                    ### これはゲームとして成り立たないので、一時的に0.55->1000としてどうあっても途切れないようにしている。
+                    ### あとで根本的にキー入力判定を見直す（pynputを使う。）
+                    # キーを離した判定（最後の打鍵検知から0.55秒以上経過）
+                    # OSのキーリピートの初期遅延（通常 250ms〜500ms）を考慮してしきい値を設定
+                    # 他のキーが新しく押された場合は現在のキーのリピート入力が途切れるため、
+                    # 他のキーの最新打鍵時刻（last_any_key_press_time）が現在のキーの最終打鍵検知より新しい場合は、
+                    # まだ押しっぱなし状態が維持されているとみなしてBAD判定をスキップする。
+                    if current_time - self.last_key_press_time[lane_idx] > 1000: #> 0.55:
+                        if self.last_any_key_press_time > self.last_key_press_time[lane_idx]:
+                            continue
+                        # 途中で離した場合はBAD！
+                        end_ev = start_ev.get('ln_partner')
+                        if end_ev and end_ev['state'] == 0:
+                            end_ev['state'] = 2  # MISS/BAD扱いの処理済み状態
+                            self.last_judgement = "BAD"
+                            self.bad_count += 1
+                            self.combo = 0
+                            self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
+                            self.judgement_time = current_time
+                        del self.active_lns[lane_idx]
+                    else:
+                        # 終端に到達したか確認
+                        end_ev = start_ev.get('ln_partner')
+                        if end_ev and current_time >= end_ev['time']:
+                            end_ev['state'] = 1  # HIT状態にする
+                            self.audio.play(end_ev['sound_id'])
+                            # 終端処理成功：コンボを1増やし、ゲージを少し回復
+                            self.combo += 1
+                            self.max_combo = max(self.max_combo, self.combo)
+                            inc = self.get_gauge_increment()
+                            self.gauge = min(100.0, self.gauge + inc)
+                            del self.active_lns[lane_idx]
 
             # ManualPlay時の見逃しMISS判定
             if not auto_play:
@@ -355,6 +407,12 @@ class Player:
                             loss_factor = 0.5 if getattr(self, 'easy_mode', False) else 1.0
                             self.gauge = max(0.0, self.gauge - (6.0 * loss_factor))
                             self.judgement_time = current_time
+
+                            # もしロングノートの始点を見逃しMISSしたなら、終端も自動的にMISS扱いにする
+                            if event.get('ln_state') == 'start':
+                                end_ev = event.get('ln_partner')
+                                if end_ev and end_ev['state'] == 0:
+                                    end_ev['state'] = 2
 
             # 終了条件：全イベントが処理され、かつ再生中の音がすべて消えた
             if all_processed and len(self.audio.active_sounds) == 0:

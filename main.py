@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 from audio import AudioEngine
 from player import Player
-from config import load_key_config, load_quit_key, load_scratch_side, load_judgement_config, load_auto_scratch, load_show_measure_lines
+from config import load_key_config, load_quit_key, load_scratch_side, load_judgement_config, load_auto_scratch, _load_toml
 import config
 from on_update import make_on_update
 import random
@@ -44,9 +44,9 @@ def main(stdscr):
         stdscr.addstr(5, 2, "Example: python3 main.py path/to/song.bms")
 
 
-    config.scratch_side = load_scratch_side()
+    opt_scratch_side = load_scratch_side()
     # SP時にスクラッチ位置に応じてマッピングを切替 (DPは常に左右固定)
-    if player.chart and player.chart.get('mode', 'SP') == 'SP' and config.scratch_side == "right":
+    if player.chart and player.chart.get('mode', 'SP') == 'SP' and opt_scratch_side == "right":
         channel_to_lane = CHANNEL_TO_LANE_RIGHT.copy()
         lane_chars = LANE_CHARS_RIGHT.copy()
     else:
@@ -54,33 +54,29 @@ def main(stdscr):
         lane_chars = LANE_CHARS_LEFT.copy()
     # Sync player mapping
     is_dp = (player.chart.get('mode', 'SP') == 'DP') if player.chart else False
-    KEY_TO_LANE = load_key_config(is_dp=is_dp)
+    KEY_TO_LANE = load_key_config(opt_scratch_side, is_dp=is_dp)
     quit_key_code = load_quit_key()
     judgement_y_config, judgement_offset_ms_config = load_judgement_config()
 
-    # プレイオプションのデフォルトロード
-    opt_autoplay = False
-    opt_autoscratch = load_auto_scratch()
-    opt_mirror = False
-    opt_random = False
-    opt_easy = False
-    opt_show_measure_lines = True
-    opt_scratch_side = config.scratch_side  # settings.toml からロードされた初期値 ("left" または "right")
     try:
-        config_file = Path(__file__).parent / "settings.toml"
-        if config_file.is_file():
-            with config_file.open('rb') as f:
-                data = tomllib.load(f)
-            play_opts = data.get('play_options', {})
-            opt_autoplay = play_opts.get('autoplay', False)
-            opt_mirror = play_opts.get('mirror', False)
-            opt_random = play_opts.get('random', False)
-            opt_easy = play_opts.get('easy_mode', False)
-            opt_show_measure_lines = play_opts.get('show_measure_lines', True)
-            opt_hispeed = play_opts.get('hispeed', 1.0)  # Read hispeed from settings
-    except Exception:
-        opt_hispeed = 1.0  # Fallback default
-
+        data = _load_toml()
+        play_opts = data.get('play_options', {})
+        opt_autoplay = play_opts.get('autoplay', False)
+        opt_mirror = play_opts.get('mirror', False)
+        opt_random = play_opts.get('random', False)
+        opt_easy = play_opts.get('easy_mode', False)
+        opt_show_measure_lines = play_opts.get('show_measure_lines', True)
+        opt_hispeed = play_opts.get('hispeed', 1.0)  # Read hispeed from settings
+        opt_autoscratch = load_auto_scratch()
+    except Exception: #何かひどいことが起きたときのfallback
+        opt_autoplay = True
+        opt_mirror = False
+        opt_random = False
+        opt_easy = False
+        opt_show_measure_lines = True
+        opt_hispeed = 1.0
+        opt_scratch_side = "left"
+        opt_autoscratch = False
 
     running = True
     while running:
@@ -138,17 +134,17 @@ def main(stdscr):
                 opt_scratch_side = "right" if opt_scratch_side == "left" else "left"
             elif key in (10, 13):  # Enter key to start play
                 # 決定されたスクラッチサイドに合わせて、キー構成とチャンネルマッピングを再生成する
-                config.scratch_side = opt_scratch_side
+                #config.scratch_side = opt_scratch_side
 
                 # Determine initial lane mapping based: scratch side
-                if not is_dp_mode and config.scratch_side == "right":
+                if not is_dp_mode and opt_scratch_side == "right":
                     channel_to_lane = CHANNEL_TO_LANE_RIGHT.copy()
                     lane_chars = LANE_CHARS_RIGHT.copy()
                 else:
                     channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
                     lane_chars = LANE_CHARS_LEFT.copy()
                 # Recompute keyboard-to-lane mapping to match the selected scratch side
-                KEY_TO_LANE = load_key_config(is_dp=is_dp_mode)
+                KEY_TO_LANE = load_key_config(opt_scratch_side, is_dp=is_dp_mode)
                 # Sync player mapping
                 player.channel_to_lane = channel_to_lane
 
@@ -157,7 +153,7 @@ def main(stdscr):
                 if player.chart.get('mode', 'SP') == 'DP':
                     scratch_lanes = {0, max_lane}
                 else:
-                    scratch_lanes = {7} if config.scratch_side == "right" else {0}
+                    scratch_lanes = {7} if opt_scratch_side == "right" else {0}
                 key_lanes = [i for i in range(max_lane + 1) if i not in scratch_lanes]
                 lane_map = {}
                 if opt_random:
@@ -183,7 +179,7 @@ def main(stdscr):
                         lane_map = {lane: (max_lane // 2 + 1 - lane) if lane <= (max_lane // 2) else (max_lane + max_lane // 2 - lane) for lane in key_lanes}
                     else:
                         # SP: mirror mapping depends on scratch side
-                        if config.scratch_side == "right":
+                        if opt_scratch_side == "right":
                             # Scratch lane is max_lane (7); playable lanes are 0..max_lane-1
                             lane_map = {lane: (max_lane - 1 - lane) for lane in key_lanes}
                         else:
@@ -203,7 +199,7 @@ def main(stdscr):
                 player.judgement_offset_ms = judgement_offset_ms_config
 
                 # Pass mutable settings dict to on_update for runtime hispeed changes
-                settings = {'hispeed': opt_hispeed}
+                settings = {'hispeed': opt_hispeed, 'opt_scratch_side': opt_scratch_side}
                 on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE, judgement_y_config, settings, lane_chars)
                 player.play(on_update=on_update, auto_play=opt_autoplay)
                 running = False

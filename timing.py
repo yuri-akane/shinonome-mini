@@ -14,6 +14,25 @@ class TimelineSegment:
     multiplier: float
     is_stop: bool = False
 
+def stop_seconds(stop_val: float, current_bpm: float) -> float:
+    """ 停止時間（秒） = (STOP値 / 192) * (240 / 現在のBPM) """
+    return stop_val * 1.25 / current_bpm
+
+def estimated_total(note_count: float) -> float:
+    """ If #TOTAL is missing or non‑positive, estimate a sensible default.
+        Use common BMS community formula: TOTAL = 7.605 * notes / (0.01 * notes + 6.5)
+        Clamp to a minimum of 260 (many players enforce this).
+        ->だが私はこだわりの式を使う：7x / (0.01x + 6) + sqrt(x) - 10
+    """
+    if note_count > 0:
+        #estimated = int(7.605 * note_count / (0.01 * note_count + 6.5))
+        estimated = 7.0 * note_count / (0.01 * note_count + 6.0) + (note_count ** 0.5) - 10
+        if estimated < 260:
+            estimated = 260
+        return estimated
+    else:
+        return 0
+
 class BpmTimeline:
     """Utility to convert time (seconds) to beat position and cumulative visual height,
     handling BPM changes, measure multipliers, and STOP events.
@@ -81,7 +100,7 @@ class BpmTimeline:
             
             delta_beat = b_end - b_start
             delta_time = delta_beat * (60.0 / curr_bpm)
-            delta_height = delta_beat * 1.0 # ここでHSが実装できる(1.0のところの数値を変える)。
+            delta_height = delta_beat * 1.0
             
             # Add normal segment
             seg = TimelineSegment(
@@ -97,6 +116,7 @@ class BpmTimeline:
             )
             self.segments.append(seg)
             
+            #逐次足しているので誤差が蓄積しうる処理。
             curr_time += delta_time
             curr_height += delta_height
             
@@ -105,10 +125,8 @@ class BpmTimeline:
                 # Update current BPM first if there's also a BPM change at b_end
                 if b_end in bpm_map:
                     curr_bpm = bpm_map[b_end]
-                stop_val = stop_map[b_end]
-                # STOP duration (seconds) = (STOP値 / 192) * (240 / 現在のBPM)
-                stop_time = (stop_val / 192.0) * (240.0 / curr_bpm)
-                
+                stop_time = stop_seconds(stop_map[b_end], curr_bpm)
+
                 stop_seg = TimelineSegment(
                     start_time=curr_time,
                     end_time=curr_time + stop_time,
@@ -121,6 +139,7 @@ class BpmTimeline:
                     is_stop=True
                 )
                 self.segments.append(stop_seg)
+                #逐次足しているので誤差が蓄積しうる処理。
                 curr_time += stop_time
 
         # Final segment for lookup beyond the last transition beat
@@ -145,19 +164,6 @@ class BpmTimeline:
 
         # Precompute start times for bisect lookup
         self._segment_start_times = [s.start_time for s in self.segments]
-
-        # Write timeline segment details to timing_debug.log
-        # try:
-        #     with open("timing_debug.log", "w", encoding="utf-8") as f:
-        #         f.write(f"Initial BPM: {self.initial_bpm}\n")
-        #         f.write("Timeline Segments:\n")
-        #         for idx, seg in enumerate(self.segments):
-        #             f.write(f"Segment {idx:03d}: Time [{seg.start_time:.3f} -> {seg.end_time:.3f}], "
-        #                     f"Beat [{seg.start_beat:.3f} -> {seg.end_beat:.3f}], "
-        #                     f"Height [{seg.start_height:.3f} -> {seg.end_height:.3f}], "
-        #                     f"BPM: {seg.bpm:.1f}, Mult: {seg.multiplier:.3f}, Stop: {seg.is_stop}\n")
-        # except Exception:
-        #     pass
 
     def get_state(self, time_sec: float) -> Tuple[float, float, float, float]:
         """Given current time in seconds, return:

@@ -5,6 +5,7 @@ import re
 from typing import Dict, List, Tuple, Any
 import logging
 from constants import CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT
+from timing import BpmTimeline, stop_seconds, estimated_total
 
 class BmsParser:
     """Parse BMS files into a structured chart representation.
@@ -26,34 +27,47 @@ class BmsParser:
         if not header_match:
             return
         key, val = header_match.groups()
-        if key == "TITLE":
+        key_upper = key.upper()
+        if key_upper == "TITLE":
             info['title'] = val
-        elif key == "ARTIST":
+        elif key_upper == "ARTIST":
             info['artist'] = val
-        elif key == "BPM":
+        elif key_upper == "BPM":
             try:
                 info['bpm'] = float(val)
             except Exception:
                 pass
-        elif key.startswith("BPM") and len(key) > 3:
-            id_36 = key[3:].upper()
+        elif key_upper.startswith("BPM") and len(key_upper) > 3:
+            id_36 = key_upper[3:].upper()
             try:
                 info['bpm_table'][id_36] = float(val)
             except Exception:
                 pass
-        elif key.startswith("STOP") and len(key) > 4:
-            id_36 = key[4:].upper()
+        elif key_upper.startswith("STOP") and len(key_upper) > 4:
+            id_36 = key_upper[4:].upper()
             try:
                 info['stop_table'][id_36] = float(val)
             except Exception:
                 pass
-        elif key == "RANK":
+        elif key_upper == "RANK":
             try:
                 info['rank'] = int(val)
             except Exception:
                 pass
-        elif key.startswith("WAV"):
-            wav_id = key[3:].upper()
+        elif key_upper == "LNOBJ":
+            info['lnobj'] = val.upper()
+        elif key_upper == "LNTYPE":
+            try:
+                info['lntype'] = int(val)
+            except Exception:
+                pass
+        elif key_upper == "LNMODE":
+            try:
+                info['lnmode'] = int(val)
+            except Exception:
+                pass
+        elif key_upper.startswith("WAV"):
+            wav_id = key_upper[3:].upper()
             wav_table[wav_id] = val
 
     def _parse_data(self, line: str, measures_multiplier: list, raw_data: list) -> None:
@@ -89,6 +103,14 @@ class BmsParser:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"BMS file not found: {file_path}")
 
+    def parse(self, file_path: str) -> dict:
+        """Parse a BMS file and return a structured chart dict.
+        The method builds header info, wav table, measures multiplier, raw data,
+        then computes beat timings and converts them to absolute seconds.
+        """
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"BMS file not found: {file_path}")
+
         info = {
             'title': '',
             'artist': '',
@@ -96,7 +118,10 @@ class BmsParser:
             'rank': 3,
             'total': None,
             'bpm_table': {},
-            'stop_table': {}
+            'stop_table': {},
+            'lnobj': None,
+            'lntype': 1,
+            'lnmode': 1
         }
         wav_table = {}
         measures_multiplier = [1.0] * 1000
@@ -127,9 +152,18 @@ class BmsParser:
             measure_beats[i] = current_beat
             current_beat += 4.0 * measures_multiplier[i]
 
+        ln_channels = {
+            "51", "52", "53", "54", "55", "56", "57", "58", "59",
+            "61", "62", "63", "64", "65", "66", "67", "68", "69"
+        }
+
         # 拍単位での各イベントの beat 値の算出
         events = []
         for measure, channel, data_str in raw_data:
+            # If lntype == 2, skip LN channels here to process them separately
+            if info['lntype'] == 2 and channel in ln_channels:
+                continue
+
             objects = [data_str[i:i+2] for i in range(0, len(data_str), 2)]
             n = len(objects)
             for i, obj in enumerate(objects):
@@ -167,7 +201,87 @@ class BmsParser:
                 if stop_val is not None:
                     event_data['stop'] = stop_val
                 events.append(event_data)
-                
+
+        # Process LNTYPE 2 channels separately
+        if info['lntype'] == 2:
+            for ch in ln_channels:
+                channel_data = [rd for rd in raw_data if rd[1] == ch]
+                if not channel_data:
+                    continue
+                grid = []
+                for measure, channel, data_str in channel_data:
+                    objects = [data_str[i:i+2] for i in range(0, len(data_str), 2)]
+                    n = len(objects)
+                    for i, obj in enumerate(objects):
+                        beat = measure_beats[measure] + (i / n) * 4.0 * measures_multiplier[measure]
+                        grid.append((beat, obj))
+                # Sort grid by beat
+                grid.sort(key=lambda x: x[0])
+
+                in_ln = False
+                start_event = None
+                for beat, obj in grid:
+                    if not in_ln:
+                        if obj != "00":
+                            start_event = {
+                                'beat': beat,
+                                'time': 0.0,
+                                'sound_id': obj,
+                                'channel': ch,
+                                'ln_state': 'start'
+                            }
+                            events.append(start_event)
+                            in_ln = True
+                    else:
+                        if obj == "00":
+                            end_event = {
+                                'beat': beat,
+                                'time': 0.0,
+                                'sound_id': start_event['sound_id'],
+                                'channel': ch,
+                                'ln_state': 'end'
+                            }
+                            events.append(end_event)
+                            in_ln = False
+                if in_ln and start_event and grid:
+                    end_event = {
+                        'beat': grid[-1][0],
+                        'time': 0.0,
+                        'sound_id': start_event['sound_id'],
+                        'channel': ch,
+                        'ln_state': 'end'
+                    }
+                    events.append(end_event)
+
+        # Mark LNTYPE 1 pairs
+        if info['lntype'] == 1:
+            for ch in ln_channels:
+                ch_events = [ev for ev in events if ev.get('channel') == ch]
+                ch_events.sort(key=lambda x: x['beat'])
+                for idx in range(0, len(ch_events) - 1, 2):
+                    ch_events[idx]['ln_state'] = 'start'
+                    ch_events[idx+1]['ln_state'] = 'end'
+
+        # Mark LNOBJ pairs
+        if info['lnobj']:
+            normal_channels = {
+                "11", "12", "13", "14", "15", "16", "17", "18", "19",
+                "21", "22", "23", "24", "25", "26", "27", "28", "29"
+            }
+            ch_events_map = {}
+            for ev in events:
+                ch = ev.get('channel')
+                if ch in normal_channels:
+                    ch_events_map.setdefault(ch, []).append(ev)
+            for ch, ch_evs in ch_events_map.items():
+                ch_evs.sort(key=lambda x: x['beat'])
+                for idx, ev in enumerate(ch_evs):
+                    if ev['sound_id'].upper() == info['lnobj']:
+                        if idx > 0:
+                            prev_ev = ch_evs[idx - 1]
+                            if prev_ev.get('ln_state') is None:
+                                prev_ev['ln_state'] = 'start'
+                                ev['ln_state'] = 'end'
 
         # Add measure length change events for UI speed factor handling
         for idx, mult in enumerate(measures_multiplier):
@@ -215,6 +329,7 @@ class BmsParser:
             ev_beat = ev['beat']
             delta_beat = ev_beat - prev_beat
             if delta_beat > 0:
+                #逐次足しているので誤差が蓄積しうる処理。
                 current_sec += delta_beat * (60.0 / current_bpm)
             
             ev['time'] = current_sec
@@ -223,32 +338,60 @@ class BmsParser:
             if 'bpm' in ev:
                 current_bpm = ev['bpm']
             if 'stop' in ev:
-                # STOP時間は 192分の1拍 を 1 とする。
-                # 停止時間（秒） = (STOP値 / 192) * (240 / 現在のBPM)
-                stop_sec = (ev['stop'] / 192.0) * (240.0 / current_bpm)
+                stop_sec = stop_seconds(ev['stop'], current_bpm)
+                #逐次足しているので誤差が蓄積しうる処理。
                 current_sec += stop_sec
                 
             prev_beat = ev_beat
 
+        # Resolve LN partners
+        ln_by_channel = {}
+        for ev in events:
+            if 'ln_state' in ev:
+                ch = ev['channel']
+                norm_ch = ch
+                if ch.startswith('5'):
+                    norm_ch = '1' + ch[1:]
+                elif ch.startswith('6'):
+                    norm_ch = '2' + ch[1:]
+                ln_by_channel.setdefault(norm_ch, []).append(ev)
+
+        for norm_ch, evs in ln_by_channel.items():
+            evs.sort(key=lambda x: x['beat'])
+            start_ev = None
+            for ev in evs:
+                if ev['ln_state'] == 'start':
+                    start_ev = ev
+                elif ev['ln_state'] == 'end' and start_ev is not None:
+                    start_ev['ln_partner_beat'] = ev['beat']
+                    start_ev['ln_partner_time'] = ev['time']
+                    start_ev['ln_partner'] = ev
+                    ev['ln_partner_beat'] = start_ev['beat']
+                    ev['ln_partner_time'] = start_ev['time']
+                    ev['ln_partner'] = start_ev
+                    start_ev = None
+
         # If #TOTAL is missing or non‑positive, estimate a sensible default.
-        # Use common BMS community formula: TOTAL = 7.605 * notes / (0.01 * notes + 6.5)
-        # Clamp to a minimum of 260 (many players enforce this).
         if not isinstance(info.get('total'), (int, float)) or info['total'] <= 0:
             # プレイ可能なノーツのみをカウント（チャンネル03/08/09や01のBGMを除いた、11〜29などのレーンチャンネル）
+            # LNの終端はカウントしないようにする
             playable_channels = {
                 "11", "12", "13", "14", "15", "16", "17", "18", "19",
                 "21", "22", "23", "24", "25", "26", "27", "28", "29"
             }
-            note_count = sum(1 for ev in events if ev['channel'] in playable_channels)
-            if note_count > 0:
-                estimated = int(7.605 * note_count / (0.01 * note_count + 6.5))
-                if estimated < 260:
-                    estimated = 260
-                info['total'] = estimated
-            else:
-                info['total'] = 0
+            note_count = 0
+            for ev in events:
+                ch = ev.get('channel')
+                if ch in playable_channels:
+                    # If LNOBJ, the end note has ln_state == 'end', so do not count it
+                    if ev.get('ln_state') == 'end':
+                        continue
+                    note_count += 1
+                elif ch in ln_channels and ev.get('ln_state') == 'start':
+                    note_count += 1
+            info['total'] = estimated_total(note_count)
+
         # Construct BpmTimeline
-        from timing import BpmTimeline
         bpm_timeline_events = []
         stop_timeline_events = []
         for ev in events:
@@ -274,6 +417,15 @@ class BmsParser:
             # SP default to left side mapping
             channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
         
+        # Add long note channels mapping dynamically
+        ln_mapping = {}
+        for ch, lane in channel_to_lane.items():
+            if ch.startswith('1'):
+                ln_mapping['5' + ch[1:]] = lane
+            elif ch.startswith('2'):
+                ln_mapping['6' + ch[1:]] = lane
+        channel_to_lane.update(ln_mapping)
+
         # Attach to chart result
         chart_channel_to_lane = channel_to_lane
 

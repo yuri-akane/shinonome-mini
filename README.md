@@ -7,6 +7,7 @@ A minimal console BMS player written in Python. It runs in a terminal using `cur
 - Supports **AUTO PLAY / MIRROR / RANDOM / EASY** options
 - Simple configuration through `settings.toml`
 - Minimal dependencies – only **miniaudio** for sound playback
+- No network connections, No output files
 
 ## Dependencies
 - Python 3.10+
@@ -40,12 +41,13 @@ The player will launch a curses UI. Use the keys defined in `settings.toml` (def
 
 ## Notes & Caveats
 - The UI is terminal‑only; no graphical interface.
-- Only a subset of BMS commands are currently parsed. BMP,BGA and other visual commands are skipped.
-- **SCROLL** commands are not yet supported.
+- Only a subset of BMS commands are currently parsed. BMP, BGA and other visual commands are skipped.
+- **SCROLL** command is not yet supported. (->future support)
+- **longnote** is partially supported. (->future support)
+- `settings.toml` does **not** allow assigning **Shift / Ctrl / Alt** keys. (->future support)
 - Works best on Shift‑JIS encoded BMS files.
-- `settings.toml` does **not** allow assigning **Shift / Ctrl / Alt** keys.
-- bmson format is not yet supported.
-- 
+- bmson format is not yet supported. (->future support)
+
 ## License
 - GPLv3
 
@@ -53,19 +55,28 @@ The player will launch a curses UI. Use the keys defined in `settings.toml` (def
 - Thanks deeply to the original [shinonome](https://github.com/kuroclef/shinonome) author.
 - 全く別物になっていますが、基本コンセプトをお借りしているので-miniとさせていただきました。
 
-## todo
+## future support(ver2.0)
+- bmson
+- better longnote support and allow Shift / Ctrl / Alt
+   - using pynput
+   
+## future support(after ver2.0)
+- SCROLL
 - STOP (partially done, but buggy at some bms...)
-- bmson, longnote, SCROLL...
 - do not playback many-time with single #WAVxx definition
+- do not use global variable
+- #BASE（36,62）
+- flac support
 
 ## this program doesn't support:
-- movie or image (BMP,BGA)
+- movie or image (BMP, BGA)
 - hidden/sudden
 - score/file output
 - IR or network connection
-- playlists
-- #RANDOM - #IF
-- mine notes
+- playlists -> ※別のプログラムであとでやる
+- #RANDOM - #IF ->余裕ができたらやるかも？
+- mine notes ->余裕ができたらやるかも？
 - invisible notes
-
+- mp3, midi
+- pms, 774, gda ->pmsくらいはやるかも…？
 

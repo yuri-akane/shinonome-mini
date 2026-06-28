@@ -1,7 +1,5 @@
 import miniaudio
 import os
-# Ensure logger path works from project root
-#from latency_logger import log_event
 
 import threading
 import array
@@ -89,6 +87,7 @@ class AudioEngine:
             print(f"Error loading {file_path}: {e}")
             return False
 
+    #あとでflacにも対応すべき。mp3は要らない？
     def load_wav_table(self, wav_table, base_path):
         """BMSのWAVテーブルに基づいて音源を一括ロードする"""
         for sound_id, file_name in wav_table.items():
