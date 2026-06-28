@@ -43,7 +43,7 @@ class Player:
         self.total_playable_notes = 0
         for event in events:
             channel = event.get('channel', '01')
-            event['is_playable'] = channel in self.channel_to_lane
+            event['is_playable'] = (channel in self.channel_to_lane) or (channel.isdigit() and 51 <= int(channel) <= 69)
             event['state'] = 0  # 0: PENDING, 1: HIT (or BGM processed), 2: MISS
             if event['is_playable']:
                 if event.get('ln_state') == 'end':
@@ -316,7 +316,7 @@ class Player:
                         event['state'] = 1
                     elif event['channel'] == 'measure_line':
                         event['state'] = 1
-                    elif event['is_playable']:
+                    elif event['is_playable'] and event.get('ln_state') != 'end':
                         # Determine if this event is a scratch note
                         channel = event.get('channel')
                         lane_idx = self.channel_to_lane.get(channel)
@@ -324,9 +324,9 @@ class Player:
                         is_scratch = False
                         if lane_idx is not None:
                             if is_dp:
-                                    is_scratch = (lane_idx in (0, 15))
+                                is_scratch = (lane_idx in (0, 15))
                             else:
-                                    is_scratch = (channel == "16" or lane_idx == 0)
+                                is_scratch = (channel == "16" or lane_idx == 0)
 
                         if auto_play or (self.auto_scratch and is_scratch):
                             self.audio.play(event['sound_id'])
@@ -349,7 +349,26 @@ class Player:
                     # 他のキーが新しく押された場合は現在のキーのリピート入力が途切れるため、
                     # 他のキーの最新打鍵時刻（last_any_key_press_time）が現在のキーの最終打鍵検知より新しい場合は、
                     # まだ押しっぱなし状態が維持されているとみなしてBAD判定をスキップする。
-                    if current_time - self.last_key_press_time[lane_idx] > 1000: #> 0.55:
+                    # キーリリース判定
+                    if current_time - self.last_key_press_time[lane_idx] > 1000:  # > 0.55 sec
+                        # If other key pressed later, consider still holding
+                        if self.last_any_key_press_time > self.last_key_press_time[lane_idx]:
+                            continue
+                        # For LNTYPE=1, do not penalize early release; just end LN without BAD
+                        if self.chart['info'].get('lntype', 1) == 1:
+                            del self.active_lns[lane_idx]
+                            continue
+                        # For LNTYPE=2, treat as BAD
+                        end_ev = start_ev.get('ln_partner')
+                        if end_ev and end_ev['state'] == 0:
+                            end_ev['state'] = 2  # MISS/BAD扱いの処理済み状態
+                            self.last_judgement = "BAD"
+                            self.bad_count += 1
+                            self.combo = 0
+                            self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
+                            self.judgement_time = current_time
+                        del self.active_lns[lane_idx]
+                        continue
                         if self.last_any_key_press_time > self.last_key_press_time[lane_idx]:
                             continue
                         # 途中で離した場合はBAD！
@@ -367,7 +386,7 @@ class Player:
                         end_ev = start_ev.get('ln_partner')
                         if end_ev and current_time >= end_ev['time']:
                             end_ev['state'] = 1  # HIT状態にする
-                            self.audio.play(end_ev['sound_id'])
+                            # self.audio.play(end_ev['sound_id'])  # Removed to prevent double sound on LN end
                             # 終端処理成功：コンボを1増やし、ゲージを少し回復
                             self.combo += 1
                             self.max_combo = max(self.max_combo, self.combo)

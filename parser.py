@@ -253,14 +253,26 @@ class BmsParser:
                     }
                     events.append(end_event)
 
-        # Mark LNTYPE 1 pairs
+        # Mark LNTYPE 1 pairs (handle possible empty cells)
         if info['lntype'] == 1:
             for ch in ln_channels:
+                # extract events for this channel and sort by beat
                 ch_events = [ev for ev in events if ev.get('channel') == ch]
                 ch_events.sort(key=lambda x: x['beat'])
-                for idx in range(0, len(ch_events) - 1, 2):
-                    ch_events[idx]['ln_state'] = 'start'
-                    ch_events[idx+1]['ln_state'] = 'end'
+                pending_start = None
+                for ev in ch_events:
+                    # skip notes that already have a ln_state (e.g., from LNOBJ handling)
+                    if ev.get('ln_state') is not None:
+                        continue
+                    if pending_start is None:
+                        # this note becomes the start of a long note
+                        ev['ln_state'] = 'start'
+                        pending_start = ev
+                    else:
+                        # this note closes the pending start
+                        ev['ln_state'] = 'end'
+                        pending_start = None
+                # if a start remains without an end, it stays as a start (open long note)
 
         # Mark LNOBJ pairs
         if info['lnobj']:

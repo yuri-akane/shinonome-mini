@@ -139,12 +139,26 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                 if event.get('state', 0) != 0:
                     continue
                 channel = event.get('channel')
-                if not channel or channel not in player.channel_to_lane:
+                if not channel:
+                    continue
+                # Support standard channels and extended 51-69 channels
+                if channel in player.channel_to_lane:
+                    lane_idx = player.channel_to_lane[channel]
+                elif channel.isdigit() and 51 <= int(channel) <= 69:
+                    # Map extended channels to their base lane by subtracting 40 (e.g., 51 -> 11)
+                    base_chan = str(int(channel) - 40)
+                    lane_idx = player.channel_to_lane.get(base_chan)
+                    if lane_idx is None:
+                        continue
+                else:
                     continue
                 if event.get('ln_state') == 'end':
                     start_ev = event.get('ln_partner')
                     if start_ev:
-                        lane_idx = player.channel_to_lane[channel]
+                        # Use previously resolved lane_idx for end events
+                        # lane_idx already set correctly for standard and extended channels
+                        # No need to re‑lookup in player.channel_to_lane
+                        # (previous code caused KeyError for 51‑69 channels)
                         if lane_count == 16 and lane_idx >= 8:
                             x = lane_x + 1 + lane_idx * 5 + 2
                         else:
@@ -167,6 +181,15 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                                 note_height_start = target_seconds_start
                             y_start = judgement_y - int((note_height_start - player_height) * scale)
                         
+                        # Draw start head (if not already hit) and end head for LNTYPE1
+                        note_str = lane_chars[lane_idx]
+                        # start head (visible when pending)
+                        if start_ev.get('state', 0) == 0 and start_y <= y_start < judgement_y:
+                            stdscr.addstr(y_start, x, note_str)
+                        # end head (visible when pending)
+                        if event.get('state', 0) == 0 and start_y <= y_end < judgement_y:
+                            stdscr.addstr(y_end, x, note_str)
+                        # draw long body
                         for y_body in range(max(start_y, y_end + 1), min(judgement_y, y_start)):
                             stdscr.addstr(y_body, x, " |")
 
@@ -179,9 +202,16 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                 if is_measure_line and not getattr(player, 'show_measure_lines', True):
                     continue
                 if not is_measure_line:
-                    if not channel or channel not in player.channel_to_lane:
+                    # Support standard and extended channels for rendering start notes
+                    if channel in player.channel_to_lane:
+                        lane_idx = player.channel_to_lane[channel]
+                    elif channel.isdigit() and 51 <= int(channel) <= 69:
+                        base_chan = str(int(channel) - 40)
+                        lane_idx = player.channel_to_lane.get(base_chan)
+                        if lane_idx is None:
+                            continue
+                    else:
                         continue
-                    lane_idx = player.channel_to_lane[channel]
                     note_str = lane_chars[lane_idx]
                 target_seconds = event['time']
                 if getattr(player, 'timeline', None):
