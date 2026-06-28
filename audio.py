@@ -11,11 +11,12 @@ class AudioEngine:
         self.lock = threading.Lock()
         
         # PlaybackDeviceの初期化 – バッファサイズは milliseconds で指定
+        # 3msは攻めすぎてノイズ多いので10msに
         self.device = miniaudio.PlaybackDevice(
             output_format=miniaudio.SampleFormat.SIGNED16,
             nchannels=2,
             sample_rate=24000,
-            buffersize_msec=3,
+            buffersize_msec=10,
         )
         
         # ジェネレータの作成と起動
