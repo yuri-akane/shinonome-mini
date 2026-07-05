@@ -60,12 +60,10 @@ The player will launch a curses UI.
 
 ## future support(ver2.0)
 - bmson
-- better longnote support and allow Shift / Ctrl / Alt
-   - using pynput
 
 ## future support(after ver2.0)
 - SCROLL
-- STOP (partially done, but buggy at some bms...)
+- STOP (ok???)
 - do not playback many-time with single #WAVxx definition
 - do not use global variable
 - #BASE（36,62）
@@ -82,3 +80,4 @@ The player will launch a curses UI.
 - invisible notes
 - mp3, midi
 - pms, 774, gda ->pmsくらいはやるかも…？
+- longnote complete support (cannot support key-release detection with normal user privilege). 
