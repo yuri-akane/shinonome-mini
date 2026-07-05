@@ -94,23 +94,60 @@ def load_key_config(scratch_side, is_dp: bool = False) -> dict:
 
     # 1P Keys
     if is_right:
-        # 右スクラッチ時: settings.tomlのlane0~lane6をインデックス0~6にマッピング
+        # 右スクラッチ時: settings.tomlのlane0~lane6をインデックス0~6にマッピング（単一キーまたは複数キー）
         for i in range(7):
-            key_str = keys_cfg.get(f'lane{i}')
-            if key_str and len(key_str) == 1:
-                new_map[ord(key_str)] = i
-    else:
-        # 左スクラッチ時: settings.tomlのlane0~lane6をインデックス1~7にマッピング
-        for i in range(7):
-            key_str = keys_cfg.get(f'lane{i}')
-            if key_str and len(key_str) == 1:
-                new_map[ord(key_str)] = i + 1
+            lane_val = keys_cfg.get(f'lane{i}')
+            # Normalize to list
+            if isinstance(lane_val, str):
+                lane_keys = [lane_val]
+            elif isinstance(lane_val, list):
+                lane_keys = lane_val
+            else:
+                lane_keys = []
+            for key_str in lane_keys:
+                if not isinstance(key_str, str):
+                    continue
+                if len(key_str) == 1:
+                    new_map[ord(key_str)] = i
+                elif key_str == "\t":
+                    new_map[9] = i  # Tab key
 
-    # 2P Keys (lane7 ~ lane13 mapped to index 8 ~ 14)
+    else:
+        # 左スクラッチ時: settings.tomlのlane0~lane6をインデックス1~7にマッピング（単一キーまたは複数キー）
+        for i in range(7):
+            lane_val = keys_cfg.get(f'lane{i}')
+            if isinstance(lane_val, str):
+                lane_keys = [lane_val]
+            elif isinstance(lane_val, list):
+                lane_keys = lane_val
+            else:
+                lane_keys = []
+            for key_str in lane_keys:
+                if not isinstance(key_str, str):
+                    continue
+                if len(key_str) == 1:
+                    new_map[ord(key_str)] = i + 1
+                elif key_str == "\t":
+                    new_map[9] = i + 1
+
+
+    # 2P Keys (lane7 ~ lane13 mapped to index 8 ~ 14) – support multiple keys per lane
     for i in range(7, 14):
-        key_str = keys_cfg.get(f'lane{i}')
-        if key_str and len(key_str) == 1:
-            new_map[ord(key_str)] = i + 1
+        lane_val = keys_cfg.get(f'lane{i}')
+        if isinstance(lane_val, str):
+            lane_keys = [lane_val]
+        elif isinstance(lane_val, list):
+            lane_keys = lane_val
+        else:
+            lane_keys = []
+        for key_str in lane_keys:
+            if not isinstance(key_str, str):
+                continue
+            if len(key_str) == 1:
+                new_map[ord(key_str)] = i + 1
+            elif key_str == "\t":
+                new_map[9] = i + 1
+
 
     # 2P Scratch (scratch_DP_right) - can be a single key or a list
     rs = keys_cfg.get('scratch_DP_right', ["", "\n"])
@@ -149,11 +186,54 @@ def load_quit_key() -> int:
     quit_key_name = "esc"
     return 27
 
+def load_modifier_keys() -> dict:
+    """Load modifier key mappings from settings.toml.
+
+    The [modifiers] section can define left/right modifiers, e.g.:
+        shift_l = 0   # 左 Shift → lane 0
+        shift_r = 7   # 右 Shift → lane 7
+        ctrl_l  = 1
+        ctrl_r  = 8
+        alt_l   = 2
+        alt_r   = 9
+    The function returns a dict mapping the *pynput* key names ("shift", "shift_r",
+    "ctrl", "ctrl_r", "alt", "alt_r") to lane indices.  Left modifiers are also
+    accessible via the generic names "shift", "ctrl", "alt".  If no mapping is defined,
+    it falls back to the legacy behaviour: map generic "shift" to lane 0 based on the
+    left‑scratch configuration.
+    """
+    data = _load_toml()
+    mod_cfg = data.get('modifiers', {})
+    result: dict[str, int] = {}
+    # Process explicit left/right mappings
+    for name, lane in mod_cfg.items():
+        if not isinstance(lane, int):
+            continue
+        name_lc = name.lower()
+        if name_lc.endswith('_l'):
+            base = name_lc[:-2]
+            result[base] = lane  # generic left name (e.g. "shift")
+        elif name_lc.endswith('_r'):
+            base = name_lc[:-2]
+            result[f"{base}_r"] = lane
+        else:
+            result[name_lc] = lane
+    # Legacy fallback when no mapping at all
+    if not result:
+        key_cfg = data.get('keys', {})
+        left_scratch = key_cfg.get('scratch_SP_left', [])
+        if isinstance(left_scratch, str):
+            left_scratch = [left_scratch]
+        for k in left_scratch:
+            if isinstance(k, str) and k.lower() == 'shift':
+                result['shift'] = 0
+                break
+    return result
+
 def load_scratch_side() -> str:
     """settings.toml の [scratch] side を読み込む。
     SP時のスクラッチ位置を "left" または "right" で返す。
     """
-    #global scratch_side
     data = _load_toml()
     if not data:
         return "left"
@@ -161,16 +241,16 @@ def load_scratch_side() -> str:
     side = scratch_cfg.get('side', 'left').lower()
     return side if side in ('left', 'right') else 'left'
 
-def load_auto_scratch() -> bool:
-    """Load the auto_scratch flag from settings.toml's [play_options] section.
-    Returns the boolean value and updates the module-level auto_scratch variable.
-    """
-    data = _load_toml()
-    if not data:
-        auto_scratch = False
-        return auto_scratch
-    play_opts = data.get('play_options', {})
-    auto_scratch = play_opts.get('auto_scratch', False)
+# def load_auto_scratch() -> bool:
+#     """Load the auto_scratch flag from settings.toml's [play_options] section.
+#     Returns the boolean value and updates the module-level auto_scratch variable.
+#     """
+#     data = _load_toml()
+#     if not data:
+#         auto_scratch = False
+#         return auto_scratch
+#     play_opts = data.get('play_options', {})
+#     auto_scratch = play_opts.get('auto_scratch', False)
 
 def load_judgement_config() -> tuple[int, int]:
     """Load judgement_y and judgement_offset_ms from settings.toml's [judgement] section.

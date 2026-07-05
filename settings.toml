@@ -1,43 +1,69 @@
-# settings.toml – configuration for Shinonome Mini ver1.35
+# settings.toml – configuration for Shinonome Mini ver1.50
 
 [scratch]
 side="left" #"left" or "right"
 
 # キーマッピング
+# お手数ですが、各キーの「shiftと一緒に押したときの文字」もセットで入力してください。（言語/キー配列によって異なるため）
+# shift/ctrl/altキーを使う場合は1つ下の[modifiers]セクションで設定してください。
 [keys]
 # 左スクラッチ（SP時左）
-scratch_SP_left   = [" ", "a", "\t"]
+scratch_SP_left   = ["a", "A", "\t"]
 # 右スクラッチ（SP時右）
-scratch_SP_right  = ["b", "g", " "]
-lane0          = "z"
-lane1          = "s"
-lane2          = "x"
-lane3          = "d"
-lane4          = "c"
-lane5          = "f"
-lane6          = "v"
-lane7          = ","
-lane8          = "l"
-lane9          = "."
-lane10         = ";"
-lane11         = "/"
-lane12         = ":"
+scratch_SP_right  = ["b", "B", " "]
+lane0          = ["z", "Z"]
+lane1          = ["s", "S"]
+lane2          = ["x", "X"]
+lane3          = ["d", "D"]
+lane4          = ["c", "C"]
+lane5          = ["f", "F"]
+lane6          = ["v", "V"]
+lane7          = [",", "<"]
+lane8          = ["l", "L"]
+lane9          = [".", ">"]
+lane10         = [";", "+"]
+lane11         = ["/", "?"]
+lane12         = [":", "*"]
 # \（バックスラッシュや円記号）はエスケープして\\としてください。（\tや\nと同様です）
-lane13         = "\\"
+lane13         = ["\\", "_"]
 # 左スクラッチ（DP時左）
-scratch_DP_left   = [" ", "a", "\t"]
+scratch_DP_left   = ["a", "A", "\t"]
 # 右スクラッチ（DP時右）
-scratch_DP_right  = ["[","]", "\n"]
+scratch_DP_right  = ["]", "}", "\n"]
+
+
+# -------------------------------------------------
+# 修飾キー（左シフト / 右シフト など）設定
+# -------------------------------------------------
+# o2jam配置等、shiftキーを使用しない場合はコメントアウトしてください。
+# また、SPで右スクラッチの場合もコメントアウトしてください。
+# 数値は内部的なレーン表示順です。（0が一番左、7がSPでの一番右、8がDPでの一番左、15がDPでの一番右）
+[modifiers]
+# 例：左シフト → レーン 0（SP/DPの左スクラッチ側に割り当てたレーン）
+shift_l = 0
+# 例：右シフト → レーン 15（DPの右スクラッチ側に割り当てたレーン）
+shift_r = 15
+# 必要に応じて他の修飾キーも設定可能
+#ctrl_l  = 1
+#ctrl_r  = x
+#alt_l   = 2
+#alt_r   = x
+
 
 # プレイオプション (各モードは bool で切り替え)
 [play_options]
 autoplay      = true   # 自動プレイ
 mirror        = false  # ミラーモード (レーン反転)
 random        = false  # ランダムノート配置
-auto_scratch  = false  # オートスクラッチ (自動 Scratch)
+auto_scratch  = false  # オートスクラッチ
 easy_mode     = false  # イージーモード (ゲージ増減抑制/判定緩和)
 show_measure_lines = true # 小節線の表示ON/OFF
 hispeed = 1.2
+speedup_key = "KEY_UP"
+speeddown_key = "KEY_DOWN"
+#他の単独キーでも可
+#speedup_key = "w"
+#speeddown_key = "q"
 
 # quit key configuration
 [quit]

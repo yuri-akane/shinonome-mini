@@ -243,7 +243,7 @@ class Player:
                 self.combo = 0
                 self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
 
-            # ロングノートの始点ノーツを正しく叩けた場合、アクティブにする
+            # # ロングノートの始点ノーツを正しく叩けた場合、アクティブにする
             if is_hit and best_event.get('ln_state') == 'start':
                 self.active_lns[lane_index] = best_event
 
@@ -316,17 +316,29 @@ class Player:
                         event['state'] = 1
                     elif event['channel'] == 'measure_line':
                         event['state'] = 1
-                    elif event['is_playable'] and event.get('ln_state') != 'end':
+                    elif event['is_playable']:
+                        # Handle end of long note automatically
+                        if event.get('ln_state') == 'end':
+                            # 終端処理成功：コンボ・ゲージは特に増やさない
+                            # Remove from active_lns if present
+                            lane_idx = self.channel_to_lane.get(event.get('channel'))
+                            if lane_idx in self.active_lns:
+                                del self.active_lns[lane_idx]
+                            event['state'] = 1
+                            event_index += 1
+                            continue
+
                         # Determine if this event is a scratch note
                         channel = event.get('channel')
                         lane_idx = self.channel_to_lane.get(channel)
                         is_dp = (self.chart.get('mode', 'SP') == 'DP')
                         is_scratch = False
                         if lane_idx is not None:
-                            if is_dp:
-                                is_scratch = (lane_idx in (0, 15))
-                            else:
-                                is_scratch = (channel == "16" or lane_idx == 0)
+                             if is_dp:
+                                 is_scratch = (lane_idx in (0, 15))
+                             else:
+                                 # In SP mode, only channel "16" is considered scratch
+                                 is_scratch = (channel == "16")
 
                         if auto_play or (self.auto_scratch and is_scratch):
                             self.audio.play(event['sound_id'])
@@ -336,63 +348,30 @@ class Player:
                 else:
                     break
 
-            # ManualPlay時の押しっぱなし判定 (ロングノート)
-            if not auto_play:
-                loss_factor = 0.5 if getattr(self, 'easy_mode', False) else 1.0
-                for lane_idx, start_ev in list(self.active_lns.items()):
-                    ### fixme: 以下の処理は、「シンプルなキー入力判定」をしているために起こっている。
-                    ### キーリピートに依存している以上、他のキーが押されると必ず途切れる。
-                    ### これはゲームとして成り立たないので、一時的に0.55->1000としてどうあっても途切れないようにしている。
-                    ### あとで根本的にキー入力判定を見直す（pynputを使う。）
-                    # キーを離した判定（最後の打鍵検知から0.55秒以上経過）
-                    # OSのキーリピートの初期遅延（通常 250ms〜500ms）を考慮してしきい値を設定
-                    # 他のキーが新しく押された場合は現在のキーのリピート入力が途切れるため、
-                    # 他のキーの最新打鍵時刻（last_any_key_press_time）が現在のキーの最終打鍵検知より新しい場合は、
-                    # まだ押しっぱなし状態が維持されているとみなしてBAD判定をスキップする。
-                    # キーリリース判定
-                    if current_time - self.last_key_press_time[lane_idx] > 1000:  # > 0.55 sec
-                        # If other key pressed later, consider still holding
-                        if self.last_any_key_press_time > self.last_key_press_time[lane_idx]:
-                            continue
-                        # For LNTYPE=1, do not penalize early release; just end LN without BAD
-                        if self.chart['info'].get('lntype', 1) == 1:
-                            del self.active_lns[lane_idx]
-                            continue
-                        # For LNTYPE=2, treat as BAD
-                        end_ev = start_ev.get('ln_partner')
-                        if end_ev and end_ev['state'] == 0:
-                            end_ev['state'] = 2  # MISS/BAD扱いの処理済み状態
-                            self.last_judgement = "BAD"
-                            self.bad_count += 1
-                            self.combo = 0
-                            self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
-                            self.judgement_time = current_time
-                        del self.active_lns[lane_idx]
-                        continue
-                        if self.last_any_key_press_time > self.last_key_press_time[lane_idx]:
-                            continue
-                        # 途中で離した場合はBAD！
-                        end_ev = start_ev.get('ln_partner')
-                        if end_ev and end_ev['state'] == 0:
-                            end_ev['state'] = 2  # MISS/BAD扱いの処理済み状態
-                            self.last_judgement = "BAD"
-                            self.bad_count += 1
-                            self.combo = 0
-                            self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
-                            self.judgement_time = current_time
-                        del self.active_lns[lane_idx]
-                    else:
-                        # 終端に到達したか確認
-                        end_ev = start_ev.get('ln_partner')
-                        if end_ev and current_time >= end_ev['time']:
-                            end_ev['state'] = 1  # HIT状態にする
-                            # self.audio.play(end_ev['sound_id'])  # Removed to prevent double sound on LN end
-                            # 終端処理成功：コンボを1増やし、ゲージを少し回復
-                            self.combo += 1
-                            self.max_combo = max(self.max_combo, self.combo)
-                            inc = self.get_gauge_increment()
-                            self.gauge = min(100.0, self.gauge + inc)
-                            del self.active_lns[lane_idx]
+            #             if self.last_any_key_press_time > self.last_key_press_time[lane_idx]:
+            #                 continue
+            #             # 途中で離した場合はBAD！
+            #             end_ev = start_ev.get('ln_partner')
+            #             if end_ev and end_ev['state'] == 0:
+            #                 end_ev['state'] = 2  # MISS/BAD扱いの処理済み状態
+            #                 self.last_judgement = "BAD"
+            #                 self.bad_count += 1
+            #                 self.combo = 0
+            #                 self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
+            #                 self.judgement_time = current_time
+            #             del self.active_lns[lane_idx]
+            #         else:
+            #             # 終端に到達したか確認
+            #             end_ev = start_ev.get('ln_partner')
+            #             if end_ev and current_time >= end_ev['time']:
+            #                 end_ev['state'] = 1  # HIT状態にする
+            #                 # self.audio.play(end_ev['sound_id'])  # Removed to prevent double sound on LN end
+            #                 # 終端処理成功：コンボを1増やし、ゲージを少し回復
+            #                 self.combo += 1
+            #                 self.max_combo = max(self.max_combo, self.combo)
+            #                 inc = self.get_gauge_increment()
+            #                 self.gauge = min(100.0, self.gauge + inc)
+            #                 del self.active_lns[lane_idx]
 
             # ManualPlay時の見逃しMISS判定
             if not auto_play:

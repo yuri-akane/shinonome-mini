@@ -1,5 +1,6 @@
 import curses
 import config
+from key_listener import start_key_listener, get_key_events
 from constants import (
     CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT,
     LANE_CHARS_LEFT, LANE_CHARS_RIGHT,
@@ -19,6 +20,10 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
         lane_chars: list of characters representing notes per lane
     """
     def on_update(current_time, events, event_index, initial_bpm, resolution, auto_play):
+        # Ensure key listener is running (only start once)
+        if not getattr(on_update, "_listener_started", False):
+            start_key_listener()
+            on_update._listener_started = True
         try:
             stdscr.erase()
 
@@ -253,16 +258,60 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
             rot_char = rotation_symbols[half_beat_number % 4]
             stdscr.addstr(judgement_y + 1, lane_x - 2, rot_char, curses.A_BOLD)
 
-            key = stdscr.getch()
-            if key == quit_key_code:
-                player.is_playing = False
-            elif key in key_to_lane:
-                if not auto_play:
-                    player.press_key(key_to_lane[key])
-            elif key == ord('+'):
-                settings['hispeed'] = min(settings.get('hispeed', 1.0) + 0.2, 10.0)
-            elif key == ord('-'):
-                settings['hispeed'] = max(settings.get('hispeed', 1.0) - 0.2, 0.2)
+            # Process curses keyboard input (normal keys + esc)
+            while True:
+                ch = stdscr.getch()
+                if ch == -1:
+                    break
+                # Quit key
+                if ch == quit_key_code:
+                    player.is_playing = False
+                    continue
+                # Lane key handling
+                if ch in key_to_lane:
+                    if not auto_play:
+                        player.press_key(key_to_lane[ch])
+                    continue
+                # Hispeed adjustments (configurable keys)
+                speedup_key = settings.get('speedup_key', '+')
+                speeddown_key = settings.get('speeddown_key', '-')
+                def _key_code(k):
+                    # Convert a key identifier to curses key code
+                    if isinstance(k, str):
+                        uk = k.upper()
+                        if uk == 'KEY_UP':
+                            return curses.KEY_UP
+                        if uk == 'KEY_DOWN':
+                            return curses.KEY_DOWN
+                        # Fallback: single character
+                        return ord(k)
+                    return k
+                if ch == _key_code(speedup_key):
+                    settings['hispeed'] = min(settings.get('hispeed', 1.0) + 0.2, 100.0)
+                elif ch == _key_code(speeddown_key):
+                    settings['hispeed'] = max(settings.get('hispeed', 1.0) - 0.2, 0.2)
+
+            # Process keyboard input using pynput for modifier keys
+            key_events = get_key_events()
+            for ev_type, k in key_events:
+                if ev_type != "press":
+                    continue
+                if not k:
+                    continue
+                # Clean up quotes if present (e.g. "'z'" -> "z")
+                if k.startswith("'") and k.endswith("'") and len(k) >= 3:
+                    k = k[1:-1]
+                
+                # Strip "Key." prefix if present (e.g. "Key.esc" -> "esc")
+                if k.startswith("Key."):
+                    k = k[4:]
+
+                # Modifier keys: stop playback using configurable mapping
+                mod_keys = settings.get('modifier_keys', {})
+                if k in mod_keys:
+                    if not auto_play:
+                        player.press_key(mod_keys[k])
+                    continue
             stdscr.refresh()
         except curses.error:
             pass

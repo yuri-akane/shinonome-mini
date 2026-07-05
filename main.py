@@ -6,7 +6,8 @@ import tomllib
 from pathlib import Path
 from audio import AudioEngine
 from player import Player
-from config import load_key_config, load_quit_key, load_scratch_side, load_judgement_config, load_auto_scratch, _load_toml
+#from config import load_key_config, load_quit_key, load_scratch_side, load_judgement_config, load_auto_scratch, load_modifier_keys, _load_toml
+from config import load_key_config, load_quit_key, load_scratch_side, load_judgement_config, load_modifier_keys, _load_toml
 import config
 from on_update import make_on_update
 import random
@@ -33,10 +34,10 @@ def main(stdscr):
     if len(sys.argv) > 1:
         try:
             player.load_chart(sys.argv[1])
-            stdscr.addstr(4, 2, f"Loaded: {player.chart['info']['title']}")
-            stdscr.addstr(6, 2, "Press 'p' to start MANUAL PLAY")
-            stdscr.addstr(7, 2, "Press 'a' to start AUTOPLAY")
-            stdscr.addstr(9, 2, f"Press '{config.quit_key_name}' to quit")
+            # stdscr.addstr(4, 2, f"Loaded: {player.chart['info']['title']}")
+            # stdscr.addstr(6, 2, "Press 'p' to start MANUAL PLAY")
+            # stdscr.addstr(7, 2, "Press 'a' to start AUTOPLAY")
+            # stdscr.addstr(9, 2, f"Press '{config.quit_key_name}' to quit")
         except Exception as e:
             stdscr.addstr(4, 2, f"Error: {e}")
     else:
@@ -67,7 +68,21 @@ def main(stdscr):
         opt_easy = play_opts.get('easy_mode', False)
         opt_show_measure_lines = play_opts.get('show_measure_lines', True)
         opt_hispeed = play_opts.get('hispeed', 1.0)  # Read hispeed from settings
-        opt_autoscratch = load_auto_scratch()
+        opt_autoscratch = play_opts.get('auto_scratch', False)
+        # Configurable hispeed key bindings
+        speedup_key = data.get('speedup_key', 'KEY_UP')
+        speeddown_key = data.get('speeddown_key', 'KEY_DOWN')
+        def _key_code(k):
+            if isinstance(k, str):
+                uk = k.upper()
+                if uk == 'KEY_UP':
+                    return curses.KEY_UP
+                if uk == 'KEY_DOWN':
+                    return curses.KEY_DOWN
+                return ord(k)
+            return k
+        speedup_code = _key_code(speedup_key)
+        speeddown_code = _key_code(speeddown_key)
     except Exception: #何かひどいことが起きたときのfallback
         opt_autoplay = True
         opt_mirror = False
@@ -96,7 +111,7 @@ def main(stdscr):
             stdscr.addstr(8, 2, f"  [R] RANDOM       : {'ON' if opt_random else 'OFF'}")
             stdscr.addstr(9, 2, f"  [E] EASY         : {'ON' if opt_easy else 'OFF'}")
             stdscr.addstr(10, 2, f"  [O] SHOW MEASURES: {'ON' if opt_show_measure_lines else 'OFF'}")
-            stdscr.addstr(11, 2, f"  [+/-] HS (Hispeed) : {opt_hispeed:.1f}")
+            stdscr.addstr(11, 2, f"  [keyup/down] HS (Hispeed) : {opt_hispeed:.1f}")
             if not is_dp_mode:
                 stdscr.addstr(12, 2, f"  [L] SCRATCH SIDE : {opt_scratch_side.upper()}")
 
@@ -126,9 +141,9 @@ def main(stdscr):
                 opt_easy = not opt_easy
             elif key in (ord('o'), ord('O')):
                 opt_show_measure_lines = not opt_show_measure_lines
-            elif key == ord('+'):
-                opt_hispeed = min(opt_hispeed + 0.2, 10.0)
-            elif key == ord('-'):
+            elif key == speedup_code:
+                opt_hispeed = min(opt_hispeed + 0.2, 100.0)
+            elif key == speeddown_code:
                 opt_hispeed = max(opt_hispeed - 0.2, 0.2)
             elif not is_dp_mode and key in (ord('l'), ord('L')):
                 opt_scratch_side = "right" if opt_scratch_side == "left" else "left"
@@ -199,7 +214,20 @@ def main(stdscr):
                 player.judgement_offset_ms = judgement_offset_ms_config
 
                 # Pass mutable settings dict to on_update for runtime hispeed changes
-                settings = {'hispeed': opt_hispeed, 'opt_scratch_side': opt_scratch_side}
+                mod_keys = load_modifier_keys()
+                if 'shift_r' not in mod_keys:
+                    # In SP mode, right scratch is lane 7 regardless of side
+                    mod_keys['shift_r'] = 7
+                # Load configurable hispeed keys from play options
+                speedup_key = play_opts.get('speedup_key', 'KEY_UP')
+                speeddown_key = play_opts.get('speeddown_key', 'KEY_DOWN')
+                settings = {
+                    'hispeed': opt_hispeed,
+                    'opt_scratch_side': opt_scratch_side,
+                    'modifier_keys': mod_keys,
+                    'speedup_key': speedup_key,
+                    'speeddown_key': speeddown_key,
+                }
                 on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE, judgement_y_config, settings, lane_chars)
                 player.play(on_update=on_update, auto_play=opt_autoplay)
                 running = False
