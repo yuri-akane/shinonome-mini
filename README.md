@@ -38,7 +38,7 @@ The player will launch a curses UI.
 - The UI is terminal‑only; no graphical interface.
 - Only a subset of BMS commands are parsed. BMP, BGA and other visual commands are skipped.
 - **SCROLL** command is not yet supported. (->future support)
-- detect modifier keys (**Shift / Ctrl / Alt**) with `pynput`
+- detect modifier keys (Shift / Ctrl / Alt) with `pynput`
 - Long note release detection (`onrelease`) is unavailable on Wayland environments, so that functionality is omitted.
 - `settings.toml` allow assigning keys (default: `z s x d …`).
 - Hispeed change button default actions have been switched to `keyup`/`keydown` for better responsiveness, and can be customized via the `settings.toml`.
