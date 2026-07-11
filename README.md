@@ -63,6 +63,7 @@ python3 main.py path/to/your_chart.bms
 ## future support(after ver1.50)
 - SCROLL
 - do not playback many-time with single #WAVxx definition
+   - "polyphony" section @ bmson
 - #BASE (36, 62)
 - flac support
 

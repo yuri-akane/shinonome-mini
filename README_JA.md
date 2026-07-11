@@ -62,6 +62,7 @@ python3 main.py path/to/your_chart.bms
 ## あとでやる（ver1.50以降or順次）
 - SCROLL命令
 - 多重再生の改善（do not playback many-time with single #WAVxx definition）
+   - bmsonではpolyphonyに該当する仕様
 - BASE命令（36,62）
 - flac対応
 
