@@ -3,7 +3,8 @@
 A minimal console BMS player written in Python. It runs in a terminal using `curses` and plays audio via **miniaudio**.
 
 ## Features
-- Supports **SP, DP**
+- Supports **bms / bmson**
+- Supports **SP(7keys), DP(14keys)**
 - Supports **AUTO PLAY / MIRROR / RANDOM / EASY** options
 - Simple configuration through `settings.toml`
 - Minimal dependencies – **miniaudio** for sound playback and **pynput** for modifier key detection
@@ -30,9 +31,11 @@ pip3 install miniaudio pynput
 
 ## Running the game
 ```bash
-python3 main.py <path-to-your-bms-file>
+python3 main.py path/to/your_chart.bms
 ```
-The player will launch a curses UI.
+- The player will launch a curses UI.
+- Press **Esc** to quit (configurable via settings).
+- If the display looks odd, set the terminal to fullscreen.
 
 ## Notes & Caveats
 - The UI is terminal‑only; no graphical interface.
@@ -40,10 +43,9 @@ The player will launch a curses UI.
 - **SCROLL** command is not yet supported. (->future support)
 - detect modifier keys (Shift / Ctrl / Alt) with `pynput`
 - Long note release detection (`onrelease`) is unavailable on Wayland environments, so that functionality is omitted.
-- `settings.toml` allow assigning keys (default: `z s x d …`).
+- `settings.toml` allows assigning keys (default: `z s x d …`).
 - Hispeed change button default actions have been switched to `keyup`/`keydown` for better responsiveness, and can be customized via the `settings.toml`.
 - Works best on Shift‑JIS encoded BMS files.
-- bmson format is not yet supported. (->future support)
 
 ## Configuration (`settings.toml`)
 - **scratch.side** – `"left"` or `"right"`
@@ -56,17 +58,12 @@ The player will launch a curses UI.
 
 ## Acknowledgements
 - Thanks deeply to the original [shinonome](https://github.com/kuroclef/shinonome) author.
-- 全く別物になっていますが、基本コンセプトをお借りしているので-miniとさせていただきました。
+- Although this is a completely different project, it borrows the core concept, hence the "-mini" suffix.
 
-## future support(ver2.0)
-- bmson
-
-## future support(after ver2.0)
+## future support(after ver1.50)
 - SCROLL
-- STOP (ok???)
 - do not playback many-time with single #WAVxx definition
-- do not use global variable
-- #BASE（36,62）
+- #BASE (36, 62)
 - flac support
 
 ## this program doesn't support:
@@ -74,10 +71,16 @@ The player will launch a curses UI.
 - hidden/sudden
 - score/file output
 - IR or network connection
-- playlists -> ※別のプログラムであとでやる
-- #RANDOM - #IF ->余裕ができたらやるかも？
-- mine notes ->余裕ができたらやるかも？
+- playlists → (planned for a separate program later)
+- #RANDOM / #IF → (maybe added later if time permits)
+- mine notes → (maybe added later if time permits)
 - invisible notes
 - mp3, midi
-- pms, 774, gda ->pmsくらいはやるかも…？
-- longnote complete support (cannot support key-release detection with normal user privilege). 
+- preview
+- pms, 774, gda → (if implemented, prioritize 5‑key/10‑key support, then 9‑key, 4‑key, 6‑key)
+- Full long‑note support (sorry i can't...)
+
+## TODO (to be verified later)
+- Verify BPM alignment when using bmson (ensure no "-1" bpm offset).
+- Check that bmson charts do not produce silent notes.
+- do not use global variable

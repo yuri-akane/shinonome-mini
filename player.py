@@ -82,6 +82,8 @@ class Player:
             # Speed factor (relative to initial BPM) used by UI for visual fall speed
             self.speed_factor = 1.0
             self.timeline = self.chart.get('timeline', None)
+            # bmsonファイルかどうかをフラグとして保持（total値の解釈が異なる）
+            self.chart['is_bmson'] = (ext == '.bmson')
             #self._debug_log(f"Initial BPM set to {self.initial_bpm}")
         except Exception as e:
             #self._debug_log(f"Error loading chart: {e}")
@@ -90,19 +92,23 @@ class Player:
         if 'wav_table' in self.chart:
             self.audio.load_wav_table(self.chart['wav_table'], self.chart['base_path'])
         # Detect DP / SP mode from #PLAYER directive in the BMS file
-        # Default to SP if not found or parsing fails. #PLAYER 1 = SP, others = DP
-        mode = 'SP'
-        try:
-            with open(file_path, 'r', encoding='shift-jis', errors='ignore') as f:
-                for line in f:
-                    if line.upper().startswith('#PLAYER'):
-                        parts = line.strip().split()
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            player_num = int(parts[1])
-                            mode = 'SP' if player_num == 1 else 'DP'
-                        break
-        except Exception:
-            pass
+        # Default to SP if not found or parsing fails. #PLAYER 1 = SP, others = DP.
+        # For bmson files, respect the mode determined by the parser.
+        if ext == '.bmson':
+            mode = self.chart['info'].get('mode', 'SP')
+        else:
+            mode = 'SP'
+            try:
+                with open(file_path, 'r', encoding='shift-jis', errors='ignore') as f:
+                    for line in f:
+                        if line.upper().startswith('#PLAYER'):
+                            parts = line.strip().split()
+                            if len(parts) >= 2 and parts[1].isdigit():
+                                player_num = int(parts[1])
+                                mode = 'SP' if player_num == 1 else 'DP'
+                            break
+            except Exception:
+                pass
         self.chart['mode'] = mode
 
     def get_current_time(self):
@@ -142,16 +148,33 @@ class Player:
         return perf, great, good, bad
 
     def get_gauge_increment(self):
-        """#TOTAL命令に基づき、ノーツ1つあたりのゲージ増加量を動的計算する"""
+        """#TOTAL命令に基づき、ノーツ1つあたりのゲージ増加量を動的計算する
+
+        BMS: #TOTAL は「全ノーツをPERFECTで叩いたときのゲージ増加量合計(%)」の絶対値。
+             increment = total / note_count
+        bmson: total は「デフォルトレートに対する相対乗数」(デフォルト=100)。
+             increment = estimated_total(note_count) * (total / 100) / note_count
+        """
         total_playable = max(1, self.total_playable_notes)
         total = self.chart['info'].get('total') if self.chart else None
+        is_bmson = self.chart.get('is_bmson', False) if self.chart else False
 
-        if total is None: #parserで処理できてればそもそもここに来ないはずだが…
+        if is_bmson:
+            # bmson: total は相対値(デフォルト=100)。
+            # parserでtotalが0以下や未設定のときはestimated_total()で埋めてあるので基本的には来ないが念のため。
             from timing import estimated_total
-            total = estimated_total(total_playable)
-
-        # PERFECT/GREAT時の増加量 (総ノーツを全てPERFECT/GREATで叩いたときにTOTAL%増えるようにする)
-        return float(total) / total_playable
+            if total is None or total < 0:
+                total = 100.0  # デフォルト値
+            base = estimated_total(total_playable)
+            # PERFECT/GREAT時の増加量 = デフォルトレート × 相対乗数
+            return base * (float(total) / 100.0) / total_playable
+        else:
+            # BMS: total は絶対値（全PERFECT時のゲージ増加量合計%）
+            if total is None:  # parserで処理できてればそもそもここに来ないはずだが…
+                from timing import estimated_total
+                total = estimated_total(total_playable)
+            # PERFECT/GREAT時の増加量 (総ノーツを全てPERFECT/GREATで叩いたときにTOTAL%増えるようにする)
+            return float(total) / total_playable
 
     def press_key(self, lane_index):
         """プレイヤーがキーを押したときの判定処理"""
@@ -207,7 +230,8 @@ class Player:
         # 判定窓（BAD以内）ならHIT
         if best_event and adjusted_diff <= bad_w:
             best_event['state'] = 1 # HIT状態にする
-            self.audio.play(best_event['sound_id'])
+            if best_event.get('sound_id'):
+                self.audio.play(best_event['sound_id'])
 
             # 動的ゲージ増加量の取得
             inc = self.get_gauge_increment()
@@ -312,7 +336,8 @@ class Player:
 
                     if event['channel'] == '01':
                         # Always play BGM regardless of is_playable or auto_play
-                        self.audio.play(event['sound_id'])
+                        if event.get('sound_id'):
+                            self.audio.play(event['sound_id'])
                         event['state'] = 1
                     elif event['channel'] == 'measure_line':
                         event['state'] = 1
@@ -341,7 +366,8 @@ class Player:
                                  is_scratch = (channel == "16")
 
                         if auto_play or (self.auto_scratch and is_scratch):
-                            self.audio.play(event['sound_id'])
+                            if event.get('sound_id'):
+                                self.audio.play(event['sound_id'])
                             event['state'] = 1
                     event_index += 1
                     continue

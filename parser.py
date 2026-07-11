@@ -451,11 +451,10 @@ class BmsParser:
         }
 
 class BmsonParser:
-    # ... (前回の実装を維持)
     def __init__(self):
         pass
 
-    def parse(self, file_path):
+    def parse(self, file_path: str) -> dict:
         """bmsonファイルをパースして内部形式に変換する"""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"bmson file not found: {file_path}")
@@ -464,33 +463,265 @@ class BmsonParser:
             data = json.load(f)
 
         # 抽出する基本情報
-        info = data.get('info', {})
+        info_data = data.get('info', {})
+        resolution = info_data.get('resolution', 480)
+        if not isinstance(resolution, (int, float)) or resolution <= 0:
+            resolution = 480
+
+        # Determine mode: if any note uses x >= 9, it's DP, else SP
+        is_dp = False
+        for channel in data.get('sound_channels', []):
+            for note in channel.get('notes', []):
+                x = note.get('x')
+                if x is not None and 9 <= x <= 16:
+                    is_dp = True
+                    break
+            if is_dp:
+                break
+
         song_info = {
-            'title': info.get('title', 'Unknown'),
-            'artist': info.get('artist', 'Unknown'),
-            'bpm': info.get('init_bpm', 130.0),
+            'title': info_data.get('title', 'Unknown'),
+            'artist': info_data.get('artist', 'Unknown'),
+            'bpm': info_data.get('init_bpm', info_data.get('bpm', 130.0)),
+            'rank': info_data.get('judge_rank', 3),
+            'total': info_data.get('total', None),
+            'bpm_table': {},
+            'stop_table': {},
+            'lnobj': None,
+            'lntype': 1,
+            'lnmode': info_data.get('lnmode', 1),
+            'mode': 'DP' if is_dp else 'SP'
+        }
+
+        # Handle rank conversion if bmson judge_rank is specified in standard 100/etc scale
+        # Typically bmson judge_rank of 100 is Normal (2) or Easy (3).
+        # We check if rank is >= 5, in which case we map it:
+        # e.g., standard bmson judge_rank: 100 is NORMAL (2).
+        if isinstance(song_info['rank'], (int, float)) and song_info['rank'] >= 5:
+            jr = song_info['rank']
+            if jr >= 120:
+                song_info['rank'] = 4  # VERY EASY
+            elif jr >= 100:
+                song_info['rank'] = 3  # EASY
+            elif jr >= 80:
+                song_info['rank'] = 2  # NORMAL
+            elif jr >= 50:
+                song_info['rank'] = 1  # HARD
+            else:
+                song_info['rank'] = 0  # VERY HARD
+
+        wav_table = {}
+        events = []
+
+        # Mapping from bmson x-lane values to BMS channels
+        # x is 1-based index: 1-7 for 1P keys, 8 for 1P scratch, 9-15 for 2P keys, 16 for 2P scratch
+        X_TO_CHANNEL_NORMAL = {
+            1: "11", 2: "12", 3: "13", 4: "14", 5: "15", 6: "18", 7: "19", 8: "16",
+            9: "21", 10: "22", 11: "23", 12: "24", 13: "25", 14: "28", 15: "29", 16: "26"
+        }
+        X_TO_CHANNEL_LN = {
+            1: "51", 2: "52", 3: "53", 4: "54", 5: "55", 6: "58", 7: "59", 8: "56",
+            9: "61", 10: "62", 11: "63", 12: "64", 13: "65", 14: "68", 15: "69", 16: "66"
         }
 
         # 音源とイベントの抽出
-        events = []
         sound_channels = data.get('sound_channels', [])
-        
         for channel in sound_channels:
             name = channel.get('name', '')
+            if not name:
+                continue
+            # Store in wav_table: map the file name to itself
+            # We normalize backslashes to forward slashes
+            name_norm = name.replace('\\', '/')
+            wav_table[name_norm] = name_norm
+
             notes = channel.get('notes', [])
             for note in notes:
+                y = note.get('y', 0)
+                l = note.get('l', 0)
+                x = note.get('x', 0)
+                c = note.get('c', False)
+                beat = y / resolution
+                sound_id_to_play = None if c else name_norm
+
+                if x in X_TO_CHANNEL_NORMAL:
+                    if l > 0:
+                        # Long Note: generate start and end events
+                        ch = X_TO_CHANNEL_LN[x]
+                        end_beat = (y + l) / resolution
+                        events.append({
+                            'beat': beat,
+                            'time': 0.0,
+                            'sound_id': sound_id_to_play,
+                            'channel': ch,
+                            'ln_state': 'start'
+                        })
+                        events.append({
+                            'beat': end_beat,
+                            'time': 0.0,
+                            'sound_id': sound_id_to_play,
+                            'channel': ch,
+                            'ln_state': 'end'
+                        })
+                    else:
+                        ch = X_TO_CHANNEL_NORMAL[x]
+                        events.append({
+                            'beat': beat,
+                            'time': 0.0,
+                            'sound_id': sound_id_to_play,
+                            'channel': ch
+                        })
+                else:
+                    # BGM note (or key sound not played in any lane)
+                    events.append({
+                        'beat': beat,
+                        'time': 0.0,
+                        'sound_id': sound_id_to_play,
+                        'channel': '01'
+                    })
+
+        # Add BPM changes
+        for bpm_ev in data.get('bpm_events', []):
+            y = bpm_ev.get('y', 0)
+            bpm_val = bpm_ev.get('bpm')
+            if bpm_val is not None:
                 events.append({
-                    'time': note.get('y', 0),    # y座標（pulseまたは拍数ベース）
-                    'sound_id': name,
-                    'type': 'sound'
+                    'beat': y / resolution,
+                    'time': 0.0,
+                    'channel': '03',
+                    'bpm': float(bpm_val)
                 })
 
-        # 時間順にソート
-        events.sort(key=lambda x: x['time'])
+        # Add STOP events
+        for stop_ev in data.get('stop_events', []):
+            y = stop_ev.get('y', 0)
+            duration = stop_ev.get('duration', 0)
+            if duration > 0:
+                # stop_val = 48.0 * duration / resolution
+                stop_val = 48.0 * duration / resolution
+                events.append({
+                    'beat': y / resolution,
+                    'time': 0.0,
+                    'channel': '09',
+                    'stop': float(stop_val)
+                })
+
+        # Add visual measure lines at the start of each measure (every 4 beats)
+        max_beat = 0.0
+        if events:
+            max_beat = max(ev['beat'] for ev in events)
+        for idx in range(int(max_beat / 4.0) + 2):
+            m_start_beat = idx * 4.0
+            events.append({
+                'beat': m_start_beat,
+                'time': 0.0,
+                'channel': 'measure_line',
+                'measure_idx': idx
+            })
+
+        # Sort events by beat and priority
+        def get_event_priority(ev):
+            ch = ev.get('channel', 'XX')
+            if ch in ("03", "08"): return 0  # BPM change first
+            if ch == "measure_line": return 1.5
+            if ch == "09": return 3          # STOP last
+            return 2                         # Notes / Sound channels
+
+        events.sort(key=lambda x: (x['beat'], get_event_priority(x)))
+
+        # Calculate time (seconds) sequentially
+        current_sec = 0.0
+        prev_beat = 0.0
+        current_bpm = song_info['bpm']
+
+        for ev in events:
+            ev_beat = ev['beat']
+            delta_beat = ev_beat - prev_beat
+            if delta_beat > 0:
+                current_sec += delta_beat * (60.0 / current_bpm)
+
+            ev['time'] = current_sec
+
+            if 'bpm' in ev:
+                current_bpm = ev['bpm']
+            if 'stop' in ev:
+                stop_sec = stop_seconds(ev['stop'], current_bpm)
+                current_sec += stop_sec
+
+            prev_beat = ev_beat
+
+        # Resolve LN partners
+        ln_by_channel = {}
+        for ev in events:
+            if 'ln_state' in ev:
+                ch = ev['channel']
+                norm_ch = ch
+                if ch.startswith('5'):
+                    norm_ch = '1' + ch[1:]
+                elif ch.startswith('6'):
+                    norm_ch = '2' + ch[1:]
+                ln_by_channel.setdefault(norm_ch, []).append(ev)
+
+        for norm_ch, evs in ln_by_channel.items():
+            evs.sort(key=lambda x: x['beat'])
+            start_ev = None
+            for ev in evs:
+                if ev['ln_state'] == 'start':
+                    start_ev = ev
+                elif ev['ln_state'] == 'end' and start_ev is not None:
+                    start_ev['ln_partner_beat'] = ev['beat']
+                    start_ev['ln_partner_time'] = ev['time']
+                    start_ev['ln_partner'] = ev
+                    ev['ln_partner_beat'] = start_ev['beat']
+                    ev['ln_partner_time'] = start_ev['time']
+                    ev['ln_partner'] = start_ev
+                    start_ev = None
+
+        # bmson の total は相対値（デフォルト = 100）。
+        # 未設定(None)のときのみデフォルト値 100.0 を補填する。
+        # total = 0 は「ゲージ増加なし」を表す有効な値なので推定で上書きしない。
+        # total < 0 は仕様上「絶対値を取る」とされているが、100.0 にフォールバックする。
+        if not isinstance(song_info.get('total'), (int, float)):
+            song_info['total'] = 100.0  # bmson spec default
+        elif song_info['total'] < 0:
+            song_info['total'] = abs(song_info['total'])
+
+
+
+        # Construct BpmTimeline
+        bpm_timeline_events = []
+        stop_timeline_events = []
+        for ev in events:
+            if 'bpm' in ev:
+                bpm_timeline_events.append((ev['beat'], ev['bpm']))
+            if 'stop' in ev:
+                stop_timeline_events.append((ev['beat'], ev['stop']))
+
+        measures_multiplier = [1.0] * (int(max_beat / 4.0) + 100)
+        timeline = BpmTimeline(
+            initial_bpm=song_info['bpm'],
+            bpm_events=bpm_timeline_events,
+            stop_events=stop_timeline_events,
+            measures_multiplier=measures_multiplier
+        )
+
+        # Channel to lane mapping
+        channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
+        ln_mapping = {}
+        for ch, lane in channel_to_lane.items():
+            if ch.startswith('1'):
+                ln_mapping['5' + ch[1:]] = lane
+            elif ch.startswith('2'):
+                ln_mapping['6' + ch[1:]] = lane
+        channel_to_lane.update(ln_mapping)
 
         return {
             'info': song_info,
-            'events': events
+            'wav_table': wav_table,
+            'events': events,
+            'base_path': os.path.dirname(file_path),
+            'timeline': timeline,
+            'channel_to_lane': channel_to_lane
         }
 
 if __name__ == "__main__":

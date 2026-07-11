@@ -3,13 +3,12 @@
 Python で実装された、ターミナル上で動作するシンプルな BMS プレイヤーです。
 - `curses` による軽量 UI
 - 音声は **miniaudio**（純粋 Python ライブラリ）で再生
-- BMS と bmson（予定） の両方をパース可能（不要チャンネルはスキップ）
 
 ## 主な機能
-- **SP, DP対応**
+- **bms / bmson対応**
+- **SP(7keys), DP(14keys)対応**
 - **AUTO PLAY / MIRROR / RANDOM / EASY** オプションを UI で切替
 - `settings.toml` にキー割り当て・設定を外部化
-- 曲情報は **タイトル + アーティスト** を同時表示
 - オフライン、ファイル出力なし
 
 ## 必要環境
@@ -34,7 +33,6 @@ pip3 install miniaudio pynput
 ```bash
 python3 main.py path/to/your_chart.bms
 ```
-- 起動後はフルスクリーンの curses UI が表示されます。
 - **Esc** キーで終了します。（設定で変更可）
 - 表示がおかしかったらterminalをfullscreenにしてください。
 
@@ -46,8 +44,7 @@ python3 main.py path/to/your_chart.bms
 - Wayland 環境では `onrelease` が利用できないため、ロングノートの離した時の判定は未実装（consoleで行う限り実装不可）です。
 - キー設定は `settings.toml` で自由に変更可能です（デフォルトは `z s x d …` など）。
 - Hispeed 変更ボタンのデフォルト動作を `keyup`/`keydown` に変更しました。設定でカスタマイズ可能です。
-- bms 形式はShift‑JISを想定しています。
-- bmson 形式は今後対応予定です。
+- bms 形式はShift‑JIS(cp932)決め打ちで読み込んでいます。昔のeuc-kr(cp949)とかは未確認です…
 
 ## Configuration (`settings.toml`)
 - **scratch.side** – `"left"` or `"right"`
@@ -62,14 +59,9 @@ python3 main.py path/to/your_chart.bms
 - こちらのプロジェクト [shinonome](https://github.com/kuroclef/shinonome) の作者様に感謝を申し上げます。
 - 全く別物になっていますが、基本コンセプトをお借りしているので‑miniとさせていただきました。
 
-## あとでやる（ver2.0まで）
-- bmson対応
-
-## あとでやる（ver2.0以降or順次）
+## あとでやる（ver1.50以降or順次）
 - SCROLL命令
-- STOP命令改善（大丈夫な気もする？）
 - 多重再生の改善（do not playback many-time with single #WAVxx definition）
-- global変数使うな
 - BASE命令（36,62）
 - flac対応
 
@@ -83,7 +75,12 @@ python3 main.py path/to/your_chart.bms
 - 地雷ノーツ -> 余裕ができたらやるかも？
 - 不可視ノーツ
 - mp3, midi対応
-- pms, 774, gda形式 -> pmsくらいはやるかも…？
+- preview
+- pms, 774, gda形式 ->やるなら5keys/10keysが先, その後9keys, 4k, 6kまで
 - ロングノートは見た目だけです（キーを離した判定ができないため）。
    - 押しっぱなしにすると次のノートでBADをとられる場合があるので少し早めに離してください。
 
+## todoあとで確認
+- bmsonのときbpm確認（1ずれない？）
+- bmsonのとき実質無音ノーツになってる？
+- global変数使うな
