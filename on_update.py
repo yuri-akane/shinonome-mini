@@ -53,8 +53,7 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                 current_bpm = getattr(player, 'current_bpm', initial_bpm)
 
             stdscr.addstr(0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
-            title = player.chart['info'].get('title', 'Unknown')
-            stdscr.addstr(1, 2, f"Song: {title} / {player.chart['info'].get('artist', 'Unknown')}")
+            stdscr.addstr(1, 2, f"Song: {player.chart['info'].get('title', 'Unknown')} / Artist: {player.chart['info'].get('artist', 'Unknown')}")
             stdscr.addstr(2, 2, f"BPM: {current_bpm:.1f} | Time: {current_time:.2f}s | HS: {settings.get('hispeed', 1.0):.1f}")
             #stdscr.addstr(3, 2, f"HS: {settings.get('hispeed', 1.0):.1f}")
 
@@ -107,9 +106,21 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
             bar_list.insert(16, "|")
             gauge_bar = "".join(bar_list)
             gauge_attr = curses.A_BOLD
-            if player.gauge >= 80.0:
-                gauge_attr |= curses.A_STANDOUT
-            stdscr.addstr(stats_y, stat_x, f"GAUGE: [{gauge_bar}] {player.gauge:5.1f}%", gauge_attr)
+            if player.hard_mode:
+                gauge_mode_label = "HARD "
+                if player.gauge <= 30.0:
+                    gauge_attr |= curses.A_BLINK   # 低ゲージ警告
+                elif player.gauge >= 80.0:
+                    gauge_attr |= curses.A_STANDOUT
+            elif getattr(player, 'easy_mode', False):
+                gauge_mode_label = "EASY "
+                if player.gauge >= 80.0:
+                    gauge_attr |= curses.A_STANDOUT
+            else:
+                gauge_mode_label = ""
+                if player.gauge >= 80.0:
+                    gauge_attr |= curses.A_STANDOUT
+            stdscr.addstr(stats_y, stat_x, f"{gauge_mode_label}GAUGE: [{gauge_bar}] {player.gauge:5.1f}%", gauge_attr)
 
             max_score = player.total_playable_notes * 2
             stdscr.addstr(stats_y + 2, stat_x, f"EX SCORE: {player.ex_score:5d} / {max_score:5d}")

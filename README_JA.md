@@ -7,7 +7,7 @@ Python で実装された、ターミナル上で動作するシンプルな BMS
 ## 主な機能
 - **bms / bmson対応**
 - **SP(7keys), DP(14keys)対応**
-- **AUTO PLAY / MIRROR / RANDOM / EASY** オプションを UI で切替
+- **AUTO PLAY / MIRROR / RANDOM / EASY / HARD** オプションを UI で切替
 - `settings.toml` にキー割り当て・設定を外部化
 - オフライン、ファイル出力なし
 

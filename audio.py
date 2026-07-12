@@ -9,7 +9,12 @@ class AudioEngine:
         self.sounds = {} # {sound_id: DecodedSoundFile}
         self.active_sounds = [] # [{"samples": array, "position": int}]
         self.lock = threading.Lock()
-        
+
+        # バックグラウンドロード用の状態管理
+        self._loading_thread = None
+        self._loaded_count = 0
+        self._total_count = 0
+
         # PlaybackDeviceの初期化 – バッファサイズは milliseconds で指定
         # 3msは攻めすぎてノイズ多いので10msに
         self.device = miniaudio.PlaybackDevice(
@@ -25,6 +30,16 @@ class AudioEngine:
         
         # 再生開始
         self.device.start(self.generator)
+
+    @property
+    def is_loading(self):
+        """バックグラウンドでWAVファイルをロード中かどうか"""
+        return self._loading_thread is not None and self._loading_thread.is_alive()
+
+    @property
+    def loading_progress(self):
+        """(ロード済み件数, 全件数) のタプルを返す"""
+        return (self._loaded_count, self._total_count)
 
     def _mix_generator(self):
         # Initial yield to receive the first frame count request
@@ -90,7 +105,7 @@ class AudioEngine:
 
     #あとでflacにも対応すべき。mp3は要らない？
     def load_wav_table(self, wav_table, base_path):
-        """BMSのWAVテーブルに基づいて音源を一括ロードする"""
+        """BMSのWAVテーブルに基づいて音源を一括ロードする（同期版）"""
         for sound_id, file_name in wav_table.items():
             file_name = file_name.replace('\\', '/')
             name, ext = os.path.splitext(file_name)
@@ -105,6 +120,34 @@ class AudioEngine:
                         break
             if not loaded:
                 print(f"Warning: Failed to load {sound_id} ({file_name})")
+
+    def load_wav_table_async(self, wav_table, base_path, on_done=None):
+        """BMSのWAVテーブルに基づいて音源をバックグラウンドスレッドでロードする。
+
+        ロード完了後に on_done コールバック（引数なし）が呼ばれる（省略可）。
+        ロード状態は is_loading / loading_progress プロパティで確認できる。
+        """
+        self._loaded_count = 0
+        self._total_count = len(wav_table)
+
+        def _worker():
+            for sound_id, file_name in wav_table.items():
+                file_name = file_name.replace('\\', '/')
+                name, ext = os.path.splitext(file_name)
+                path_no_ext = os.path.join(base_path, name)
+
+                for e in ['.wav', '.ogg', '.WAV', '.OGG', ext]:
+                    full_path = path_no_ext + e
+                    if os.path.exists(full_path):
+                        self.load_sound(sound_id, full_path)
+                        break
+                self._loaded_count += 1
+
+            if on_done is not None:
+                on_done()
+
+        self._loading_thread = threading.Thread(target=_worker, daemon=True)
+        self._loading_thread.start()
 
     def play(self, sound_id):
         """ロード済みの音を再生する"""

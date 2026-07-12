@@ -57,6 +57,7 @@ mirror        = false  # ミラーモード (レーン反転)
 random        = false  # ランダムノート配置
 auto_scratch  = false  # オートスクラッチ
 easy_mode     = false  # イージーモード (ゲージ増減抑制/判定緩和)
+hard_gauge    = false
 show_measure_lines = true # 小節線の表示ON/OFF
 hispeed = 1.2
 speedup_key = "KEY_UP"

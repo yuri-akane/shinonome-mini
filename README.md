@@ -5,7 +5,7 @@ A minimal console BMS player written in Python. It runs in a terminal using `cur
 ## Features
 - Supports **bms / bmson**
 - Supports **SP(7keys), DP(14keys)**
-- Supports **AUTO PLAY / MIRROR / RANDOM / EASY** options
+- Supports **AUTO PLAY / MIRROR / RANDOM / EASY / HARD** options
 - Simple configuration through `settings.toml`
 - Minimal dependencies – **miniaudio** for sound playback and **pynput** for modifier key detection
 - No network connections, No output files

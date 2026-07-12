@@ -17,6 +17,73 @@ from constants import (
     KEY_NAMES_DP, KEY_NAMES_RIGHT, KEY_NAMES_LEFT
 )
 
+def _show_game_over(stdscr, player, quit_key_code):
+    """HARDゲージが0%に達したときのGAME OVER画面を表示する。
+    任意キーを受け取るまでブロックする。その後呼び出し元がプログラムを終了させる。
+    """
+    try:
+        curses.curs_set(0)
+        stdscr.nodelay(False)
+    except curses.error:
+        pass
+    stdscr.erase()
+    max_y, max_x = stdscr.getmaxyx()
+
+    box_w = 50
+    box_h = 18
+    bx = max(0, (max_x - box_w) // 2)
+    by = max(0, (max_y - box_h) // 2)
+
+    def pr(row, col, text, attr=curses.A_NORMAL):
+        try:
+            stdscr.addstr(by + row, bx + col, text, attr)
+        except curses.error:
+            pass
+
+    border = "+" + "-" * (box_w - 2) + "+"
+    blank  = "|" + " " * (box_w - 2) + "|"
+    for r in range(box_h):
+        pr(r, 0, border if r in (0, box_h - 1) else blank)
+
+    title = "G A M E   O V E R"
+    pr(2, (box_w - len(title)) // 2, title, curses.A_BOLD | curses.A_STANDOUT)
+
+    sub = "~  Hard Gauge reached 0%  ~"
+    pr(4, (box_w - len(sub)) // 2, sub)
+
+    pr(6, 4, "---  Results  ---")
+    stats = [
+        ("PERFECT", player.perfect_count),
+        ("GREAT  ", player.great_count),
+        ("GOOD   ", player.good_count),
+        ("BAD    ", player.bad_count),
+        ("MISS   ", player.miss_count),
+    ]
+    for i, (label, val) in enumerate(stats):
+        pr(7 + i, 5, f"{label} : {val:5d}")
+
+    max_score = player.total_playable_notes * 2
+    pr(13, 5, f"EX SCORE : {player.ex_score:5d} / {max_score:5d}")
+    pr(14, 5, f"MAX COMBO: {player.max_combo:5d}")
+
+    #footer = "Press any key to exit"
+    footer = f"Press [{config.quit_key_name}] to Quit"
+    pr(16, (box_w - len(footer)) // 2, footer, curses.A_DIM)
+
+    stdscr.refresh()
+    while True:
+        time.sleep(0.05) #ここのsleepはメニュー画面での話なのでこれ(20FPS)で十分
+        key = stdscr.getch()
+        if key == quit_key_code:
+            break
+        else:
+            continue
+    try:
+        stdscr.nodelay(True)
+    except curses.error:
+        pass
+
+
 def main(stdscr):
     # Some terminals may not support cursor visibility changes; ignore errors
     try:
@@ -34,10 +101,7 @@ def main(stdscr):
     if len(sys.argv) > 1:
         try:
             player.load_chart(sys.argv[1])
-            # stdscr.addstr(4, 2, f"Loaded: {player.chart['info']['title']}")
-            # stdscr.addstr(6, 2, "Press 'p' to start MANUAL PLAY")
-            # stdscr.addstr(7, 2, "Press 'a' to start AUTOPLAY")
-            # stdscr.addstr(9, 2, f"Press '{config.quit_key_name}' to quit")
+            player.load_audio_async()  # 音声リソースをバックグラウンドでロード開始
         except Exception as e:
             stdscr.addstr(4, 2, f"Error: {e}")
     else:
@@ -66,6 +130,7 @@ def main(stdscr):
         opt_mirror = play_opts.get('mirror', False)
         opt_random = play_opts.get('random', False)
         opt_easy = play_opts.get('easy_mode', False)
+        opt_hard = play_opts.get('hard_gauge', False)
         opt_show_measure_lines = play_opts.get('show_measure_lines', True)
         opt_hispeed = play_opts.get('hispeed', 1.0)  # Read hispeed from settings
         opt_autoscratch = play_opts.get('auto_scratch', False)
@@ -88,6 +153,7 @@ def main(stdscr):
         opt_mirror = False
         opt_random = False
         opt_easy = False
+        opt_hard = False
         opt_show_measure_lines = True
         opt_hispeed = 1.0
         opt_scratch_side = "left"
@@ -99,9 +165,17 @@ def main(stdscr):
         stdscr.addstr(0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
 
         if player.chart:
-            stdscr.addstr(2, 2, f"Loaded Song: {player.chart['info']['title']}")
+            #stdscr.addstr(2, 2, f"Song: {player.chart['info']['title']}")
+            stdscr.addstr(1, 2, f"Song: {player.chart['info'].get('title', 'Unknown')} / Artist: {player.chart['info'].get('artist', 'Unknown')}")
 
             is_dp_mode = (player.chart.get('mode', 'SP') == 'DP')
+
+            # ロード状態の表示
+            if player.audio.is_loading:
+                loaded, total = player.audio.loading_progress
+                stdscr.addstr(2, 2, f"Loading audio... ({loaded}/{total})")
+            else:
+                stdscr.addstr(2, 2, "Audio ready.                          ")
 
             # プレイオプション設定の表示
             stdscr.addstr(4, 2, "=== PLAY OPTIONS ===")
@@ -110,14 +184,18 @@ def main(stdscr):
             stdscr.addstr(7, 2, f"  [M] MIRROR       : {'ON' if opt_mirror else 'OFF'}")
             stdscr.addstr(8, 2, f"  [R] RANDOM       : {'ON' if opt_random else 'OFF'}")
             stdscr.addstr(9, 2, f"  [E] EASY         : {'ON' if opt_easy else 'OFF'}")
-            stdscr.addstr(10, 2, f"  [O] SHOW MEASURES: {'ON' if opt_show_measure_lines else 'OFF'}")
-            stdscr.addstr(11, 2, f"  [keyup/down] HS (Hispeed) : {opt_hispeed:.1f}")
+            stdscr.addstr(10, 2, f"  [H] HARD GAUGE   : {'ON' if opt_hard else 'OFF'}")
+            stdscr.addstr(11, 2, f"  [O] SHOW MEASURES: {'ON' if opt_show_measure_lines else 'OFF'}")
+            stdscr.addstr(12, 2, f"  [keyup/down] HS (Hispeed) : {opt_hispeed:.1f}")
             if not is_dp_mode:
-                stdscr.addstr(12, 2, f"  [L] SCRATCH SIDE : {opt_scratch_side.upper()}")
+                stdscr.addstr(13, 2, f"  [L] SCRATCH SIDE : {opt_scratch_side.upper()}")
 
-            stdscr.addstr(13, 2, "Press key [A/S/M/R/E/O" + ("" if is_dp_mode else "/L") + "] to toggle option.")
-            stdscr.addstr(15, 2, "Press [Enter] to START PLAY")
-            stdscr.addstr(16, 2, f"Press [{config.quit_key_name}] to Quit")
+            stdscr.addstr(14, 2, "Press key [A/S/M/R/E/H/O" + ("" if is_dp_mode else "/L") + "] to toggle option.")
+            if player.is_audio_ready:
+                stdscr.addstr(16, 2, "Press [Enter] to START PLAY")
+            else:
+                stdscr.addstr(16, 2, "[Enter] will be available after audio loads")
+            stdscr.addstr(17, 2, f"Press [{config.quit_key_name}] to Quit")
         else:
             stdscr.addstr(2, 2, "Please specify a BMS file as an argument.")
             stdscr.addstr(3, 2, "Example: python3 main.py path/to/song.bms")
@@ -139,6 +217,12 @@ def main(stdscr):
                 opt_random = not opt_random
             elif key in (ord('e'), ord('E')):
                 opt_easy = not opt_easy
+                if opt_easy:
+                    opt_hard = False  # EASYとHARDは排他
+            elif key in (ord('h'), ord('H')):
+                opt_hard = not opt_hard
+                if opt_hard:
+                    opt_easy = False  # EASYとHARDは排他
             elif key in (ord('o'), ord('O')):
                 opt_show_measure_lines = not opt_show_measure_lines
             elif key == speedup_code:
@@ -147,7 +231,7 @@ def main(stdscr):
                 opt_hispeed = max(opt_hispeed - 0.2, 0.2)
             elif not is_dp_mode and key in (ord('l'), ord('L')):
                 opt_scratch_side = "right" if opt_scratch_side == "left" else "left"
-            elif key in (10, 13):  # Enter key to start play
+            elif key in (10, 13) and player.is_audio_ready:  # Enter key to start play (音声ロード完了後のみ受付け)
                 # 決定されたスクラッチサイドに合わせて、キー構成とチャンネルマッピングを再生成する
                 #config.scratch_side = opt_scratch_side
 
@@ -209,7 +293,9 @@ def main(stdscr):
                 # KEY_TO_LANE (keyboard input) remains unchanged to preserve key positions and highlights
 
                 player.auto_scratch = opt_autoscratch
-                player.easy_mode = opt_easy
+                # EASYとHARDは排他。両方Trueの場合はHARDを優先する。
+                player.hard_mode = opt_hard
+                player.easy_mode = opt_easy and not opt_hard
                 player.show_measure_lines = opt_show_measure_lines
                 player.judgement_offset_ms = judgement_offset_ms_config
 
@@ -230,6 +316,8 @@ def main(stdscr):
                 }
                 on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE, judgement_y_config, settings, lane_chars)
                 player.play(on_update=on_update, auto_play=opt_autoplay)
+                if player.is_dead:
+                    _show_game_over(stdscr, player, quit_key_code)
                 running = False
 
         time.sleep(0.05) #ここのsleepはメニュー画面での話なのでこれ(20FPS)で十分

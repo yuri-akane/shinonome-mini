@@ -14,6 +14,8 @@ class Player:
         self.start_time = 0
         self.resolution = 480  # bmson default
         self.auto_scratch = False
+        self.hard_mode = False
+        self.is_dead = False
 
         # 判定・演出関連
         self.last_judgement = ""  # "PERFECT", "GREAT", "GOOD", "BAD", "MISS"
@@ -88,9 +90,6 @@ class Player:
         except Exception as e:
             #self._debug_log(f"Error loading chart: {e}")
             raise
-        # Load audio assets if present
-        if 'wav_table' in self.chart:
-            self.audio.load_wav_table(self.chart['wav_table'], self.chart['base_path'])
         # Detect DP / SP mode from #PLAYER directive in the BMS file
         # Default to SP if not found or parsing fails. #PLAYER 1 = SP, others = DP.
         # For bmson files, respect the mode determined by the parser.
@@ -110,6 +109,24 @@ class Player:
             except Exception:
                 pass
         self.chart['mode'] = mode
+
+    def load_audio_async(self):
+        """チャートのWAVテーブルをバックグラウンドでロード開始する。
+        load_chart() の完了後に呼び出すこと。
+        ロード状態は is_audio_ready プロパティで確認できる。
+        """
+        if self.chart and 'wav_table' in self.chart:
+            self.audio.load_wav_table_async(
+                self.chart['wav_table'],
+                self.chart['base_path']
+            )
+
+    @property
+    def is_audio_ready(self):
+        """音声リソースのロードが完了して再生可能な状態かどうか。
+        チャートがない場合やWAVテーブルがない場合は True を返す。
+        """
+        return not self.audio.is_loading
 
     def get_current_time(self):
         if not self.is_playing:
@@ -143,7 +160,7 @@ class Player:
             perf *= 1.5
             great *= 1.5
             good *= 1.5
-            bad *= 1.5
+            bad *= 1.4 # 1.5 #badハマりがゲーム性を損なうのでせめてもの抵抗
 
         return perf, great, good, bad
 
@@ -175,6 +192,21 @@ class Player:
                 total = estimated_total(total_playable)
             # PERFECT/GREAT時の増加量 (総ノーツを全てPERFECT/GREATで叩いたときにTOTAL%増えるようにする)
             return float(total) / total_playable
+
+    def _hard_gauge_loss(self, is_miss: bool) -> float:
+        """HARDゲージのBAD/MISS時ゲージ減少量を計算する（負の値を返す）。
+        現在のゲージ量 x = gauge/100 に応じた補正関数を使用する。
+          f(x) = 1 - (1-x)^2
+          BAD : -(1 + 4*f(x))
+          MISS: -(2 + 8*f(x))
+        ゲージが高いほど減少量が大きく、低いほど減少量が小さい。
+        """
+        x = self.gauge / 100.0
+        fx = 1.0 - (1.0 - x) ** 2
+        if is_miss:
+            return -(2.0 + 8.0 * fx)
+        else:
+            return -(1.0 + 4.0 * fx)
 
     def press_key(self, lane_index):
         """プレイヤーがキーを押したときの判定処理"""
@@ -236,8 +268,14 @@ class Player:
             # 動的ゲージ増加量の取得
             inc = self.get_gauge_increment()
 
-            # イージーモード時はゲージ減少量を半分にする
-            loss_factor = 0.5 if getattr(self, 'easy_mode', False) else 1.0
+            # モード別のゲージ増加倍率を決定
+            if self.hard_mode:
+                # HARDゲージ: 回復量を抑制
+                perf_mult, great_mult, good_mult = 0.2, 0.15, 0.1
+            else:
+                # イージーモード時はゲージ減少量を半分にする
+                loss_factor = 0.5 if getattr(self, 'easy_mode', False) else 1.0
+                perf_mult, great_mult, good_mult = 1.0, 1.0, 0.5
 
             is_hit = False
             # 判定文字・スコア・ゲージ・コンボの割り当て
@@ -246,26 +284,33 @@ class Player:
                 self.ex_score += 2
                 self.perfect_count += 1
                 self.combo += 1
-                self.gauge = min(100.0, self.gauge + inc)
+                self.gauge = min(100.0, self.gauge + inc * perf_mult)
                 is_hit = True
             elif adjusted_diff <= great_w:
                 self.last_judgement = "GREAT"
                 self.ex_score += 1
                 self.great_count += 1
                 self.combo += 1
-                self.gauge = min(100.0, self.gauge + inc)
+                self.gauge = min(100.0, self.gauge + inc * great_mult)
                 is_hit = True
             elif adjusted_diff <= good_w:
                 self.last_judgement = "GOOD"
                 self.good_count += 1
                 self.combo += 1
-                self.gauge = min(100.0, self.gauge + (inc * 0.5))
+                self.gauge = min(100.0, self.gauge + inc * good_mult)
                 is_hit = True
             else:
                 self.last_judgement = "BAD"
                 self.bad_count += 1
                 self.combo = 0
-                self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
+                if self.hard_mode:
+                    loss = self._hard_gauge_loss(is_miss=False)
+                    self.gauge = max(0.0, self.gauge + loss)
+                    if self.gauge <= 0.0:
+                        self.is_dead = True
+                        self.is_playing = False
+                else:
+                    self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
 
             # # ロングノートの始点ノーツを正しく叩けた場合、アクティブにする
             if is_hit and best_event.get('ln_state') == 'start':
@@ -286,7 +331,8 @@ class Player:
         self.active_lns.clear()
 
         # 統計情報の初期化
-        self.gauge = 22.0
+        self.gauge = 100.0 if self.hard_mode else 22.0
+        self.is_dead = False
         self.ex_score = 0
         self.combo = 0
         self.max_combo = 0
@@ -427,9 +473,16 @@ class Player:
                             self.last_judgement = "MISS"
                             self.miss_count += 1
                             self.combo = 0
-                            # イージーモード時はMISS時のゲージ減少量を半分にする
-                            loss_factor = 0.5 if getattr(self, 'easy_mode', False) else 1.0
-                            self.gauge = max(0.0, self.gauge - (6.0 * loss_factor))
+                            if self.hard_mode:
+                                loss = self._hard_gauge_loss(is_miss=True)
+                                self.gauge = max(0.0, self.gauge + loss)
+                                if self.gauge <= 0.0:
+                                    self.is_dead = True
+                                    self.is_playing = False
+                            else:
+                                # イージーモード時はMISS時のゲージ減少量を半分にする
+                                loss_factor = 0.5 if getattr(self, 'easy_mode', False) else 1.0
+                                self.gauge = max(0.0, self.gauge - (6.0 * loss_factor))
                             self.judgement_time = current_time
 
                             # もしロングノートの始点を見逃しMISSしたなら、終端も自動的にMISS扱いにする
@@ -447,7 +500,7 @@ class Player:
             if on_update:
                 on_update(current_time, events, event_index, self.current_bpm, self.resolution, auto_play)
 
-            time.sleep(0.005) #ここのsleepは低スペックPCでは取り除けばcpu100%使える。
+            time.sleep(0.005) #PCのスペックが低い場合ここのsleepを取り除けば多少軽くなる
 
         self.is_playing = False
 
