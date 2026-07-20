@@ -208,6 +208,14 @@ class Player:
         else:
             return -(1.0 + 4.0 * fx)
 
+    def _get_polyphony_limit(self, sound_id):
+        if not self.chart:
+            return 1
+        # bmsonの場合はpolyphony_tableの値を取得、なければ1。BMS形式の場合は常に1とする。
+        if self.chart.get('is_bmson', False):
+            return self.chart.get('polyphony_table', {}).get(sound_id, 1)
+        return 1
+
     def press_key(self, lane_index):
         """プレイヤーがキーを押したときの判定処理"""
         if not self.is_playing or not self.chart:
@@ -263,7 +271,8 @@ class Player:
         if best_event and adjusted_diff <= bad_w:
             best_event['state'] = 1 # HIT状態にする
             if best_event.get('sound_id'):
-                self.audio.play(best_event['sound_id'])
+                limit = self._get_polyphony_limit(best_event['sound_id'])
+                self.audio.play(best_event['sound_id'], limit)
 
             # 動的ゲージ増加量の取得
             inc = self.get_gauge_increment()
@@ -383,7 +392,8 @@ class Player:
                     if event['channel'] == '01':
                         # Always play BGM regardless of is_playable or auto_play
                         if event.get('sound_id'):
-                            self.audio.play(event['sound_id'])
+                            limit = self._get_polyphony_limit(event['sound_id'])
+                            self.audio.play(event['sound_id'], limit)
                         event['state'] = 1
                     elif event['channel'] == 'measure_line':
                         event['state'] = 1
@@ -413,7 +423,8 @@ class Player:
 
                         if auto_play or (self.auto_scratch and is_scratch):
                             if event.get('sound_id'):
-                                self.audio.play(event['sound_id'])
+                                limit = self._get_polyphony_limit(event['sound_id'])
+                                self.audio.play(event['sound_id'], limit)
                             event['state'] = 1
                     event_index += 1
                     continue

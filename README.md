@@ -63,9 +63,10 @@ python3 main.py path/to/your_chart.bms
 ## future support(after ver1.50)
 - SCROLL
 - do not playback many-time with single #WAVxx definition
-   - "polyphony" section @ bmson
-- #BASE (36, 62)
+   - "polyphony" section @ bmson ->1.53a ok
+- #BASE (36, 62)　->1.53a ok
 - flac support
+- pynput use or nouse flag by setting　->1.53b ok
 
 ## this program doesn't support:
 - movie or image (BMP, BGA)

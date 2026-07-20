@@ -307,12 +307,14 @@ def main(stdscr):
                 # Load configurable hispeed keys from play options
                 speedup_key = play_opts.get('speedup_key', 'KEY_UP')
                 speeddown_key = play_opts.get('speeddown_key', 'KEY_DOWN')
+                opt_use_pynput = config.load_use_pynput()
                 settings = {
                     'hispeed': opt_hispeed,
                     'opt_scratch_side': opt_scratch_side,
                     'modifier_keys': mod_keys,
                     'speedup_key': speedup_key,
                     'speeddown_key': speeddown_key,
+                    'use_pynput': opt_use_pynput,
                 }
                 on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE, judgement_y_config, settings, lane_chars)
                 player.play(on_update=on_update, auto_play=opt_autoplay)

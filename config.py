@@ -230,6 +230,12 @@ def load_modifier_keys() -> dict:
                 break
     return result
 
+def load_use_pynput() -> bool:
+    """Load use_pynput flag from settings.toml. Defaults to True."""
+    data = _load_toml()
+    mod_cfg = data.get('modifiers', {})
+    return mod_cfg.get('use_pynput', True)
+
 def load_scratch_side() -> str:
     """settings.toml の [scratch] side を読み込む。
     SP時のスクラッチ位置を "left" または "right" で返す。

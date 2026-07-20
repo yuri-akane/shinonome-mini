@@ -1,6 +1,12 @@
 import curses
 import config
-from key_listener import start_key_listener, get_key_events
+try:
+    from key_listener import start_key_listener, get_key_events
+    KEY_LISTENER_AVAILABLE = True
+except ImportError:
+    start_key_listener = None
+    get_key_events = None
+    KEY_LISTENER_AVAILABLE = False
 from constants import (
     CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT,
     LANE_CHARS_LEFT, LANE_CHARS_RIGHT,
@@ -21,8 +27,10 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
     """
     def on_update(current_time, events, event_index, initial_bpm, resolution, auto_play):
         # Ensure key listener is running (only start once)
-        if not getattr(on_update, "_listener_started", False):
-            start_key_listener()
+        use_pynput = settings.get('use_pynput', True) and KEY_LISTENER_AVAILABLE
+        if use_pynput and not getattr(on_update, "_listener_started", False):
+            if start_key_listener:
+                start_key_listener()
             on_update._listener_started = True
         try:
             stdscr.erase()
@@ -303,7 +311,7 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                     settings['hispeed'] = max(settings.get('hispeed', 1.0) - 0.2, 0.2)
 
             # Process keyboard input using pynput for modifier keys
-            key_events = get_key_events()
+            key_events = get_key_events() if (use_pynput and get_key_events) else []
             for ev_type, k in key_events:
                 if ev_type != "press":
                     continue

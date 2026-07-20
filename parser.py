@@ -3,7 +3,7 @@ import os
 import re
 
 from typing import Dict, List, Tuple, Any
-import logging
+#import logging
 from constants import CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT
 from timing import BpmTimeline, stop_seconds, estimated_total
 
@@ -16,18 +16,25 @@ class BmsParser:
         self.header_re = re.compile(r"^#(\w+)\s+(.+)")
         self.data_re = re.compile(r"^#(\d{3})(\d{2}):(.+)")
 
-    def _parse_header(self, line: str, info: dict, wav_table: dict) -> None:
+    def _parse_header(self, line: str, info: dict, wav_table: dict, base: int) -> None:
         """Parse a header line and update info or wav_table.
         Args:
             line: The raw line string starting with '#'.
             info: Dictionary accumulating song metadata.
             wav_table: Dictionary mapping wav IDs to file paths.
+            base: Active radix for parsing IDs.
         """
         header_match = self.header_re.match(line)
         if not header_match:
             return
         key, val = header_match.groups()
         key_upper = key.upper()
+
+        def clean_id(raw_id: str) -> str:
+            if base == 62:
+                return raw_id
+            return raw_id.upper()
+
         if key_upper == "TITLE":
             info['title'] = val
         elif key_upper == "ARTIST":
@@ -38,13 +45,13 @@ class BmsParser:
             except Exception:
                 pass
         elif key_upper.startswith("BPM") and len(key_upper) > 3:
-            id_36 = key_upper[3:].upper()
+            id_36 = clean_id(key[3:])
             try:
                 info['bpm_table'][id_36] = float(val)
             except Exception:
                 pass
         elif key_upper.startswith("STOP") and len(key_upper) > 4:
-            id_36 = key_upper[4:].upper()
+            id_36 = clean_id(key[4:])
             try:
                 info['stop_table'][id_36] = float(val)
             except Exception:
@@ -55,7 +62,7 @@ class BmsParser:
             except Exception:
                 pass
         elif key_upper == "LNOBJ":
-            info['lnobj'] = val.upper()
+            info['lnobj'] = clean_id(val)
         elif key_upper == "LNTYPE":
             try:
                 info['lntype'] = int(val)
@@ -67,8 +74,13 @@ class BmsParser:
             except Exception:
                 pass
         elif key_upper.startswith("WAV"):
-            wav_id = key_upper[3:].upper()
+            wav_id = clean_id(key[3:])
             wav_table[wav_id] = val
+        elif key_upper == "BASE":
+            try:
+                info['base'] = int(val)
+            except Exception:
+                pass
 
     def _parse_data(self, line: str, measures_multiplier: list, raw_data: list) -> None:
         """Parse a data line (#measurechannel:data) and update measure multiplier or raw data.
@@ -103,14 +115,6 @@ class BmsParser:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"BMS file not found: {file_path}")
 
-    def parse(self, file_path: str) -> dict:
-        """Parse a BMS file and return a structured chart dict.
-        The method builds header info, wav table, measures multiplier, raw data,
-        then computes beat timings and converts them to absolute seconds.
-        """
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"BMS file not found: {file_path}")
-
         info = {
             'title': '',
             'artist': '',
@@ -121,11 +125,32 @@ class BmsParser:
             'stop_table': {},
             'lnobj': None,
             'lntype': 1,
-            'lnmode': 1
+            'lnmode': 1,
+            'base': 36
         }
         wav_table = {}
         measures_multiplier = [1.0] * 1000
         raw_data = []
+
+        base = 36
+        # Pre-scan for #BASE to know if we need case sensitivity
+        with open(file_path, 'r', encoding='shift-jis', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if not line.startswith('#'): continue
+                m = re.match(r"^#BASE\s+(\d+)", line, re.IGNORECASE)
+                if m:
+                    try:
+                        base = int(m.group(1))
+                        info['base'] = base
+                    except:
+                        pass
+                    break
+
+        def clean_id(raw_id: str) -> str:
+            if base == 62:
+                return raw_id
+            return raw_id.upper()
 
         # BMSは一般的にShift-JISまたはCP932が多い
         with open(file_path, 'r', encoding='shift-jis', errors='ignore') as f:
@@ -137,7 +162,7 @@ class BmsParser:
                 header_match = self.header_re.match(line)
                 if header_match:
                     # Use helper to parse header line
-                    self._parse_header(line, info, wav_table)
+                    self._parse_header(line, info, wav_table, base)
                     continue
                 # If not a header, try parsing as data line
                 data_match = self.data_re.match(line)
@@ -180,20 +205,20 @@ class BmsParser:
                     except:
                         pass
                 elif channel == "08":
-                    # 拡張BPMテーブル（36進数定義）から参照
-                    ref_key = obj.upper()
+                    # 拡張BPMテーブル（36/62進数定義）から参照
+                    ref_key = clean_id(obj)
                     if ref_key in info['bpm_table']:
                         bpm_val = info['bpm_table'][ref_key]
                 elif channel == "09":
                     # STOPテーブルから参照
-                    ref_key = obj.upper()
+                    ref_key = clean_id(obj)
                     if ref_key in info['stop_table']:
                         stop_val = info['stop_table'][ref_key]
 
                 event_data = {
                     'beat': beat,
                     'time': 0.0, # あとで秒数に変換して上書きする
-                    'sound_id': obj,
+                    'sound_id': clean_id(obj),
                     'channel': channel
                 }
                 if bpm_val is not None:
@@ -226,7 +251,7 @@ class BmsParser:
                             start_event = {
                                 'beat': beat,
                                 'time': 0.0,
-                                'sound_id': obj,
+                                'sound_id': clean_id(obj),
                                 'channel': ch,
                                 'ln_state': 'start'
                             }
@@ -288,7 +313,7 @@ class BmsParser:
             for ch, ch_evs in ch_events_map.items():
                 ch_evs.sort(key=lambda x: x['beat'])
                 for idx, ev in enumerate(ch_evs):
-                    if ev['sound_id'].upper() == info['lnobj']:
+                    if ev['sound_id'] == info['lnobj']:
                         if idx > 0:
                             prev_ev = ch_evs[idx - 1]
                             if prev_ev.get('ln_state') is None:
@@ -444,6 +469,7 @@ class BmsParser:
         return {
             'info': info,
             'wav_table': wav_table,
+            'polyphony_table': {},
             'events': events,
             'base_path': os.path.dirname(file_path),
             'timeline': timeline,
@@ -524,6 +550,8 @@ class BmsonParser:
             9: "61", 10: "62", 11: "63", 12: "64", 13: "65", 14: "68", 15: "69", 16: "66"
         }
 
+        polyphony_table = {}
+
         # 音源とイベントの抽出
         sound_channels = data.get('sound_channels', [])
         for channel in sound_channels:
@@ -534,6 +562,10 @@ class BmsonParser:
             # We normalize backslashes to forward slashes
             name_norm = name.replace('\\', '/')
             wav_table[name_norm] = name_norm
+            
+            # polyphony があればパースし、なければデフォルト 1
+            polyphony = channel.get('polyphony', 1)
+            polyphony_table[name_norm] = int(polyphony)
 
             notes = channel.get('notes', [])
             for note in notes:
@@ -718,6 +750,7 @@ class BmsonParser:
         return {
             'info': song_info,
             'wav_table': wav_table,
+            'polyphony_table': polyphony_table,
             'events': events,
             'base_path': os.path.dirname(file_path),
             'timeline': timeline,

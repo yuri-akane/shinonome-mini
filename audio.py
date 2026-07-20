@@ -149,16 +149,29 @@ class AudioEngine:
         self._loading_thread = threading.Thread(target=_worker, daemon=True)
         self._loading_thread.start()
 
-    def play(self, sound_id):
+    def play(self, sound_id, limit=1):
         """ロード済みの音を再生する"""
         if sound_id in self.sounds:
             sound = self.sounds[sound_id]
             # 新しい再生インスタンスを作成して追加
             with self.lock:
-                # Log when a sound is queued for playback
-                # if not sound_id.startswith('01'): #???01はWAV01なのか12301なのか混同している？
-                #     log_event('play_queued', f'sound_id={sound_id}')
+                # すでに再生中の同じ sound_id の音を検索
+                matching = [snd for snd in self.active_sounds if snd.get("sound_id") == sound_id]
+                # 制限数を満たすために、古い音（matchingの先頭要素）を削除
+                if limit <= 1:
+                    for snd in matching:
+                        if snd in self.active_sounds:
+                            self.active_sounds.remove(snd)
+                else:
+                    excess = len(matching) - limit + 1
+                    if excess > 0:
+                        for i in range(excess):
+                            snd = matching[i]
+                            if snd in self.active_sounds:
+                                self.active_sounds.remove(snd)
+
                 self.active_sounds.append({
+                    "sound_id": sound_id,
                     "samples": sound.samples,
                     "position": 0
                 })
