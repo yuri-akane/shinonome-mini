@@ -10,11 +10,12 @@ Python で実装された、ターミナル上で動作するシンプルな BMS
 - **AUTO PLAY / MIRROR / RANDOM / EASY / HARD** オプションを UI で切替
 - `settings.toml` にキー割り当て・設定を外部化
 - オフライン、ファイル出力なし
+- "SOLID"ゲージ: 初期値60%だがさらにゲージが硬いオプション
 
 ## 必要環境
 - Python 3.10 以上
-- ALSA / PulseAudio 等、`miniaudio` が利用できるオーディオ環境
-- **pynput** – Shift / Ctrl / Alt キー判定のみに使用しています。
+- ALSA / PulseAudio 等、**miniaudio** が利用できるオーディオ環境
+- **pynput**（任意） – Shift / Ctrl / Alt キー判定のみに使用しています。
 
 ## セットアップ手順
 ```bash
@@ -34,7 +35,7 @@ pip3 install miniaudio pynput
 python3 main.py path/to/your_chart.bms
 ```
 - **Esc** キーで終了します。（設定で変更可）
-- 表示がおかしかったらterminalをfullscreenにしてください。
+- 表示がおかしかったらterminalをfullscreenにしたりフォントサイズを小さくして調整してください。
 
 ## Notes & Caveats
 - UI は端末だけの表示で、グラフィカル UI はありません。
@@ -42,15 +43,21 @@ python3 main.py path/to/your_chart.bms
 - **SCROLL** コマンドは未対応です。今後実装予定です。
 - **pynput** で **Shift / Ctrl / Alt** キーの判定に対応しています。
 - Wayland 環境では `onrelease` が利用できないため、ロングノートの離した時の判定は未実装（consoleで行う限り実装不可）です。
-- キー設定は `settings.toml` で自由に変更可能です（デフォルトは `z s x d …` など）。
-- Hispeed 変更ボタンのデフォルト動作を `keyup`/`keydown` に変更しました。設定でカスタマイズ可能です。
-- bms 形式はShift‑JIS(cp932)決め打ちで読み込んでいます。昔のeuc-kr(cp949)とかは未確認です…
+- bms 形式はShift‑JIS(cp932)決め打ちで読み込んでいます。昔のeuc-kr(cp949)とかutf-8は未確認です…->一応あとでsettings.tomlで設定できるようにします
 
-## Configuration (`settings.toml`)
+## SOLIDゲージ
+- 初期値60%、80%以上でクリアですが、ゲージが増減共に硬い（増えにくく減りにくい）オプションです。
+- HARDゲージは「ゲージが0%に近いほど減少量が少ない」のに対して、SOLIDゲージは「ゲージが100%に近いほど増加量が少ない」です。
+- 増加量は通常の：{0%: 2/3, 50%: 1/2, 70%: 1/3, 80%: 1/4, 90%: 1/8, 95%: 1/16, 99%: 1/75}程度です。
+- 減少量は、HARDと併用した場合にはそのまま、それ以外のモードでは通常の1/3（poor:-2%）です。
+
+## 設定 (`settings.toml`)
 - **scratch.side** – `"left"` or `"right"`
-- **keys** – map each lane and scratches to your preferred keys
-- **play_options** – toggle auto‑play, mirror, random, easy mode, etc.
-- **judgement** – customize judgement line position and timing offset
+- **keys** – 各レーンとスクラッチに好みのキーを割り当てます（デフォルトは `z s x d …` ）
+- Hispeed 変更ボタンのデフォルト動作を `keyup`/`keydown` に変更しました。設定でカスタマイズ可能です。
+- **play_options** – オートプレイ、ミラー、ランダム、イージー、ハードなどの切り替えを行います。
+- **judgement** – 判定ラインの位置やタイミングオフセットを調整します。
+- 音がブツブツ切れるときは、audioセクションでサンプリングレートを下げ、モノラルに設定してください。
 
 ## ライセンス
 - GPLv3
@@ -64,8 +71,10 @@ python3 main.py path/to/your_chart.bms
 - 多重再生の改善（do not playback many-time with single #WAVxx definition）
    - bmsonではpolyphonyに該当する仕様 ->1.53a ok
 - BASE命令（36,62） ->1.53a ok
-- flac対応
+- flac対応 ->1.56 ok?
 - pynput use or nouse flag by setting　->1.53b ok
+- 画面表示オプション（none(画面なし)、tiny(ノーツのみ、表示幅・高さも縮小)、mini（通常））、コマンドラインオプション
+- bmsのデフォルトエンコーディング指定(shift-jis, euc-kr, utf-8)
 
 ## minimalに保つためやらない
 - 画像・動画表示
@@ -75,7 +84,7 @@ python3 main.py path/to/your_chart.bms
 - プレイリスト -> ※別のプログラムであとでやる
 - #RANDOM〜#IF命令 -> 余裕ができたらやるかも？
 - 地雷ノーツ -> 余裕ができたらやるかも？
-- 不可視ノーツ
+- ZZ（即死）地雷、不可視ノーツ、FREEZONE
 - mp3, midi対応
 - preview
 - pms, 774, gda形式 ->やるなら5keys/10keysが先, その後9keys, 4k, 6kまで

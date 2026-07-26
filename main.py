@@ -131,6 +131,7 @@ def main(stdscr):
         opt_random = play_opts.get('random', False)
         opt_easy = play_opts.get('easy_mode', False)
         opt_hard = play_opts.get('hard_gauge', False)
+        opt_solid = play_opts.get('solid_gauge', False)
         opt_show_measure_lines = play_opts.get('show_measure_lines', True)
         opt_hispeed = play_opts.get('hispeed', 1.0)  # Read hispeed from settings
         opt_autoscratch = play_opts.get('auto_scratch', False)
@@ -154,6 +155,7 @@ def main(stdscr):
         opt_random = False
         opt_easy = False
         opt_hard = False
+        opt_solid = False
         opt_show_measure_lines = True
         opt_hispeed = 1.0
         opt_scratch_side = "left"
@@ -189,13 +191,15 @@ def main(stdscr):
             stdscr.addstr(12, 2, f"  [keyup/down] HS (Hispeed) : {opt_hispeed:.1f}")
             if not is_dp_mode:
                 stdscr.addstr(13, 2, f"  [L] SCRATCH SIDE : {opt_scratch_side.upper()}")
-
-            stdscr.addstr(14, 2, "Press key [A/S/M/R/E/H/O" + ("" if is_dp_mode else "/L") + "] to toggle option.")
-            if player.is_audio_ready:
-                stdscr.addstr(16, 2, "Press [Enter] to START PLAY")
+                stdscr.addstr(14, 2, f"  [$] SOLID GAUGE  : {'ON' if opt_solid else 'OFF'}")
             else:
-                stdscr.addstr(16, 2, "[Enter] will be available after audio loads")
-            stdscr.addstr(17, 2, f"Press [{config.quit_key_name}] to Quit")
+                stdscr.addstr(13, 2, f"  [$] SOLID GAUGE  : {'ON' if opt_solid else 'OFF'}")
+            stdscr.addstr(16, 2, "Press key [A/S/M/R/E/H/O" + ("" if is_dp_mode else "/L") + "/$] to toggle option.")
+            if player.is_audio_ready:
+                stdscr.addstr(18, 2, "Press [Enter] to START PLAY")
+            else:
+                stdscr.addstr(18, 2, "[Enter] will be available after audio loads")
+            stdscr.addstr(19, 2, f"Press [{config.quit_key_name}] to Quit")
         else:
             stdscr.addstr(2, 2, "Please specify a BMS file as an argument.")
             stdscr.addstr(3, 2, "Example: python3 main.py path/to/song.bms")
@@ -223,6 +227,8 @@ def main(stdscr):
                 opt_hard = not opt_hard
                 if opt_hard:
                     opt_easy = False  # EASYとHARDは排他
+            elif key == ord('$'):
+                opt_solid = not opt_solid
             elif key in (ord('o'), ord('O')):
                 opt_show_measure_lines = not opt_show_measure_lines
             elif key == speedup_code:
@@ -296,6 +302,7 @@ def main(stdscr):
                 # EASYとHARDは排他。両方Trueの場合はHARDを優先する。
                 player.hard_mode = opt_hard
                 player.easy_mode = opt_easy and not opt_hard
+                player.solid_gauge = opt_solid
                 player.show_measure_lines = opt_show_measure_lines
                 player.judgement_offset_ms = judgement_offset_ms_config
 
@@ -315,6 +322,7 @@ def main(stdscr):
                     'speedup_key': speedup_key,
                     'speeddown_key': speeddown_key,
                     'use_pynput': opt_use_pynput,
+                    'opt_solid': opt_solid
                 }
                 on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE, judgement_y_config, settings, lane_chars)
                 player.play(on_update=on_update, auto_play=opt_autoplay)

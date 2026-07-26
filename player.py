@@ -14,29 +14,15 @@ class Player:
         self.start_time = 0
         self.resolution = 480  # bmson default
         self.auto_scratch = False
+        self.easy_mode = False
         self.hard_mode = False
-        self.is_dead = False
-
-        # 判定・演出関連
-        self.last_judgement = ""  # "PERFECT", "GREAT", "GOOD", "BAD", "MISS"
-        self.judgement_time = 0  # 判定が発生した時刻
-        self.key_pressed_time = [0.0] * 16  # 各レーン(0〜15)の最終打鍵時刻 (演出用)
-
+        self.solid_gauge = False
+        
         # ゲージ・スコア・統計情報
-        self.gauge = 22.0  # グルーヴゲージ (初期値 22%)
-        self.ex_score = 0  # EXスコア (PERFECT=2, GREAT=1)
-        self.combo = 0
-        self.max_combo = 0
-        self.perfect_count = 0
-        self.great_count = 0
-        self.good_count = 0
-        self.bad_count = 0
-        self.miss_count = 0
         self.total_playable_notes = 0  # 総プレイノーツ数
-        self.active_lns = {}  # lane_index -> start_event
-        self.last_key_press_time = [0.0] * 16
         self.last_any_key_press_time = 0.0
-
+        self.reset_stats() #その他コンボ数・misscount等
+        
     def _init_event_state(self):
         """Initialize event flags and count playable notes.
         Called after loading a chart to separate concerns from the playback loop.
@@ -65,7 +51,6 @@ class Player:
         self.current_bpm = event['bpm']
         if getattr(self, 'initial_bpm', None):
             self.speed_factor = self.current_bpm / self.initial_bpm
-
 
     def load_chart(self, file_path):
         ext = os.path.splitext(file_path)[1].lower()
@@ -156,7 +141,7 @@ class Player:
             perf, great, good, bad = 0.10, 0.20, 0.30, 0.40
 
         # EASYオプションが有効な場合は、さらに判定窓を1.5倍緩くする
-        if getattr(self, 'easy_mode', False):
+        if self.easy_mode:
             perf *= 1.5
             great *= 1.5
             good *= 1.5
@@ -207,6 +192,38 @@ class Player:
             return -(2.0 + 8.0 * fx)
         else:
             return -(1.0 + 4.0 * fx)
+
+    def _set_gauge_loss_factor(self):
+        """通常/easyゲージのBAD/MISS時ゲージ減少量のloss_factorを計算する。
+        イージーモード時はゲージ減少量を1/2にする。
+        solidゲージの場合は1/3にする。(easy併用なら1/6)
+        """
+        x = 1.0
+        if self.easy_mode:
+            x /= 2.0
+        if self.solid_gauge:
+            x /= 3.0
+        self.loss_factor = x
+
+    def _reset_gauge(self):
+        """optionに応じたゲージリセット"""
+        if self.solid_gauge: #solid+hardでも60%始まり
+            self.gauge = 60.0
+        elif self.hard_mode:
+            self.gauge = 100.0
+        else:
+            self.gauge = 22.0
+    
+    def _solid_gauge_gain_factor(self) -> float:
+        """SOLIDゲージのゲージ増加量のgain_factorを計算する。
+        現在のゲージ量 x = gauge/100 に応じた補正関数を使用する。
+          f(x) = (1-x^2)/1.5
+        ゲージが高いほど増加量が小さく、低いほど増加量が大きい。いずれの場合でも通常ゲージよりは小さい。
+        ゲージ増加量（比）：{0%: 2/3, 50%: 1/2, 70%: 1/3, 80%: 1/4, 90%: 1/8, 95%: 1/16, 99%: 1/75}
+        """
+        # SOLIDゲージ: ゲージに応じて回復量を抑制、イージーでもハードでも適用される
+        x = self.gauge / 100.0
+        return (1.0 - x ** 2) / 1.5 
 
     def _get_polyphony_limit(self, sound_id):
         if not self.chart:
@@ -273,19 +290,7 @@ class Player:
             if best_event.get('sound_id'):
                 limit = self._get_polyphony_limit(best_event['sound_id'])
                 self.audio.play(best_event['sound_id'], limit)
-
-            # 動的ゲージ増加量の取得
-            inc = self.get_gauge_increment()
-
-            # モード別のゲージ増加倍率を決定
-            if self.hard_mode:
-                # HARDゲージ: 回復量を抑制
-                perf_mult, great_mult, good_mult = 0.2, 0.15, 0.1
-            else:
-                # イージーモード時はゲージ減少量を半分にする
-                loss_factor = 0.5 if getattr(self, 'easy_mode', False) else 1.0
-                perf_mult, great_mult, good_mult = 1.0, 1.0, 0.5
-
+            
             is_hit = False
             # 判定文字・スコア・ゲージ・コンボの割り当て
             if adjusted_diff <= perf_w:
@@ -293,20 +298,29 @@ class Player:
                 self.ex_score += 2
                 self.perfect_count += 1
                 self.combo += 1
-                self.gauge = min(100.0, self.gauge + inc * perf_mult)
+                inc = self.perf_gauge_inc
+                if self.solid_gauge:
+                    inc *= self._solid_gauge_gain_factor()
+                self.gauge = min(100.0, self.gauge + inc)
                 is_hit = True
             elif adjusted_diff <= great_w:
                 self.last_judgement = "GREAT"
                 self.ex_score += 1
                 self.great_count += 1
                 self.combo += 1
-                self.gauge = min(100.0, self.gauge + inc * great_mult)
+                inc = self.great_gauge_inc
+                if self.solid_gauge:
+                    inc *= self._solid_gauge_gain_factor()
+                self.gauge = min(100.0, self.gauge + inc)
                 is_hit = True
             elif adjusted_diff <= good_w:
                 self.last_judgement = "GOOD"
                 self.good_count += 1
                 self.combo += 1
-                self.gauge = min(100.0, self.gauge + inc * good_mult)
+                inc = self.good_gauge_inc
+                if self.solid_gauge:
+                    inc *= self._solid_gauge_gain_factor()
+                self.gauge = min(100.0, self.gauge + inc)
                 is_hit = True
             else:
                 self.last_judgement = "BAD"
@@ -319,30 +333,27 @@ class Player:
                         self.is_dead = True
                         self.is_playing = False
                 else:
-                    self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
+                    self.gauge = max(0.0, self.gauge - (4.0 * self.loss_factor))
 
-            # # ロングノートの始点ノーツを正しく叩けた場合、アクティブにする
+            # ロングノートの始点ノーツを正しく叩けた場合、アクティブにする
             if is_hit and best_event.get('ln_state') == 'start':
                 self.active_lns[lane_index] = best_event
 
             self.max_combo = max(self.max_combo, self.combo)
             self.judgement_time = current_time
 
-    def play(self, on_update=None, auto_play=True):
-        if not self.chart:
-            return
+    def reset_stats(self):
+        """プレイ開始時にリセットしたい項目をまとめて管理する"""
 
-        self.is_playing = True
-        self.last_judgement = ""
-        self.judgement_time = 0
-        self.key_pressed_time = [0.0] * 16
-        self.last_key_press_time = [0.0] * 16
-        self.active_lns.clear()
-
-        # 統計情報の初期化
-        self.gauge = 100.0 if self.hard_mode else 22.0
         self.is_dead = False
-        self.ex_score = 0
+
+        # 判定・演出関連
+        self.last_judgement = ""  # "PERFECT", "GREAT", "GOOD", "BAD", "MISS"
+        self.judgement_time = 0  # 判定が発生した時刻
+        self.key_pressed_time = [0.0] * 16  # 各レーン(0〜15)の最終打鍵時刻 (演出用)
+
+        # ゲージ・スコア・統計情報
+        self.ex_score = 0  # EXスコア (PERFECT=2, GREAT=1)
         self.combo = 0
         self.max_combo = 0
         self.perfect_count = 0
@@ -351,27 +362,68 @@ class Player:
         self.bad_count = 0
         self.miss_count = 0
 
+        self.active_lns = {}  # lane_index -> start_event
+        self.last_key_press_time = [0.0] * 16
+        
+        self._set_gauge_loss_factor()
+        self._reset_gauge()
+
+    def set_gauge_increment(self):
+        # モード別のゲージ増加倍率を決定
+        # solid_gaugeは現在のgauge依存なので別に定義する
+        inc = self.get_gauge_increment()
+        if self.hard_mode:
+            # HARDゲージ: 回復量を抑制
+            self.perf_gauge_inc  = inc * 0.2
+            self.great_gauge_inc = inc * 0.15
+            self.good_gauge_inc  = inc * 0.1
+        else:
+            # easyゲージと通常ゲージ: 通常の回復量
+            self.perf_gauge_inc  = inc
+            self.great_gauge_inc = inc
+            self.good_gauge_inc  = inc * 0.5
+
+    def play(self, on_update=None, auto_play=True):
+        if not self.chart:
+            return
+
+        self.is_playing = True
+        self.reset_stats() #その他コンボ数・misscount等
+
         events = self.chart['events']
         initial_bpm = self.chart['info']['bpm']
         # Prepare event flags and count playable notes
         self._init_event_state()
 
-        #self._debug_log("=== First 10 events (beat, time) ===")
-        #for i, ev in enumerate(events[:10]):
-        #    self._debug_log(f"{i}: beat={ev.get('beat')}, time={ev.get('time')}")
         self.start_time = time.perf_counter()
         event_index = 0
         self.current_bpm = initial_bpm
 
+        # 小節長変更(02)や小節線(measure_line)を除いた、演奏・演出に関わる実質的な最終イベント時刻を算出
+        meaningful_events = [
+            ev for ev in events
+            if ev.get('channel') not in ('02', 'measure_line')
+        ]
+        if meaningful_events:
+            last_event_time = max(ev['time'] for ev in meaningful_events)
+        else:
+            last_event_time = events[-1]['time'] if events else 0.0
+
+        #eventを読み込んでから（playable_notesが判明してから）ゲージ増加量を計算
+        self.set_gauge_increment()
+
         while self.is_playing:
             current_time = self.get_current_time()
 
-            # 全イベントが処理済みになったかチェック
-            all_processed = True
-            for event in events:
-                if event['state'] == 0:
-                    all_processed = False
-                    break
+            # 全イベントが処理済みになったかチェック (O(1) 最適化)
+            # 最後のイベントの時刻に達するまでは絶対に全処理完了にはならない
+            if current_time >= last_event_time:
+                if event_index >= len(events):
+                    all_processed = True
+                else:
+                    all_processed = all(ev.get('state', 0) != 0 for ev in events[event_index:])
+            else:
+                all_processed = False
 
             # 自動発音（BGM または AutoPlay時のプレイノーツ、およびBPM変化イベント）
             while event_index < len(events):
@@ -382,8 +434,8 @@ class Player:
                 if current_time >= target_seconds:
                     # Process control events (BPM or measure changes)
                     from control import process_control_event
-                    old_bpm = self.current_bpm
-                    old_mult = getattr(self, 'current_measure_multiplier', 1.0)
+                    #old_bpm = self.current_bpm #使ってない変数？
+                    #old_mult = getattr(self, 'current_measure_multiplier', 1.0) #使ってない変数？
                     if process_control_event(self, event, auto_play):
                         event['state'] = 1
                         event_index += 1
@@ -431,35 +483,20 @@ class Player:
                 else:
                     break
 
-            #             if self.last_any_key_press_time > self.last_key_press_time[lane_idx]:
-            #                 continue
-            #             # 途中で離した場合はBAD！
-            #             end_ev = start_ev.get('ln_partner')
-            #             if end_ev and end_ev['state'] == 0:
-            #                 end_ev['state'] = 2  # MISS/BAD扱いの処理済み状態
-            #                 self.last_judgement = "BAD"
-            #                 self.bad_count += 1
-            #                 self.combo = 0
-            #                 self.gauge = max(0.0, self.gauge - (4.0 * loss_factor))
-            #                 self.judgement_time = current_time
-            #             del self.active_lns[lane_idx]
-            #         else:
-            #             # 終端に到達したか確認
-            #             end_ev = start_ev.get('ln_partner')
-            #             if end_ev and current_time >= end_ev['time']:
-            #                 end_ev['state'] = 1  # HIT状態にする
-            #                 # self.audio.play(end_ev['sound_id'])  # Removed to prevent double sound on LN end
-            #                 # 終端処理成功：コンボを1増やし、ゲージを少し回復
-            #                 self.combo += 1
-            #                 self.max_combo = max(self.max_combo, self.combo)
-            #                 inc = self.get_gauge_increment()
-            #                 self.gauge = min(100.0, self.gauge + inc)
-            #                 del self.active_lns[lane_idx]
+            # ロングノートで「キーを離した」判定ができる場合はここに書くが、
+            # curses/pynputの制限や、sudoかevdev周りの特権が必要になるので本プロジェクトでは実装しない。
 
             # ManualPlay時の見逃しMISS判定
             if not auto_play:
                 perf_w, great_w, good_w, bad_w = self.get_judgement_windows()
+                offset_seconds = getattr(self, 'judgement_offset_ms', 0) / 1000.0
+                #for event in events[event_index:]:
                 for event in events:
+                    target_seconds = event['time']
+                    # 時間順にソートされているため、まだ判定窓手前（未来）のイベントに到達したら探索中断
+                    if (target_seconds + offset_seconds) - current_time > bad_w:
+                        break
+
                     if event['state'] == 0 and event['is_playable']:
                         # オートスクラッチが有効な場合、スクラッチノーツは見逃しMISS判定から除外する
                         if self.auto_scratch:
@@ -476,8 +513,6 @@ class Player:
                             if is_scratch:
                                 continue
 
-                        target_seconds = event['time']
-                        offset_seconds = getattr(self, 'judgement_offset_ms', 0) / 1000.0
                         # 判定（BAD窓）を過ぎたら自動的にMISS
                         if current_time - (target_seconds + offset_seconds) > bad_w:
                             event['state'] = 2
@@ -491,9 +526,7 @@ class Player:
                                     self.is_dead = True
                                     self.is_playing = False
                             else:
-                                # イージーモード時はMISS時のゲージ減少量を半分にする
-                                loss_factor = 0.5 if getattr(self, 'easy_mode', False) else 1.0
-                                self.gauge = max(0.0, self.gauge - (6.0 * loss_factor))
+                                self.gauge = max(0.0, self.gauge - (6.0 * self.loss_factor))
                             self.judgement_time = current_time
 
                             # もしロングノートの始点を見逃しMISSしたなら、終端も自動的にMISS扱いにする

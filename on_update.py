@@ -13,6 +13,7 @@ from constants import (
     KEY_NAMES_DP, KEY_NAMES_RIGHT, KEY_NAMES_LEFT,
 )
 
+
 def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_config, settings, lane_chars):
     """Create an update callback for the player.
 
@@ -25,6 +26,58 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
         settings: mutable settings dict (e.g., hispeed)
         lane_chars: list of characters representing notes per lane
     """
+    #closureなので、事前に計算できるものはなるべく事前にやっておく
+    def _key_code(k):
+        # Convert a key identifier to curses key code
+        if isinstance(k, str):
+            uk = k.upper()
+            if uk == 'KEY_UP':
+                return curses.KEY_UP
+            if uk == 'KEY_DOWN':
+                return curses.KEY_DOWN
+            # Fallback: single character
+            return ord(k)
+        return k
+    start_y = 4
+    lane_x = 4
+    base_speed = 22.0
+
+    is_dp = (player.chart.get('mode', 'SP') == 'DP')
+
+    lane_count = 16 if is_dp else 8
+    if lane_count == 16:
+        LANE_UNIT = "|" + "    |" * 8 + " " + "|" + "    |" * 8
+        JUDGE_UNIT = "+" + "----+" * 8 + " " + "+" + "----+" * 8
+        def lane_posx(lane_idx):
+            offset = 2 if lane_idx >= 8 else 0
+            return lane_x + 1 + lane_idx * 5 + offset
+    else:
+        LANE_UNIT = "|" + "    |" * lane_count
+        JUDGE_UNIT = "+" + "----+" * lane_count
+        def lane_posx(lane_idx):
+            return lane_x + 1 + lane_idx * 5
+
+    if is_dp:
+        key_names = KEY_NAMES_DP
+    elif settings['opt_scratch_side'] == "right":
+        key_names = KEY_NAMES_RIGHT
+    else:
+        key_names = KEY_NAMES_LEFT
+
+    speedup_keycode   = _key_code(settings.get('speedup_key', '+'))
+    speeddown_keycode = _key_code(settings.get('speeddown_key', '-'))
+
+    judgement_y = judgement_y_config
+    if is_dp:
+        stats_y = judgement_y + 5
+        stat_x = lane_x + (lane_count // 2) * 5 + 2
+    else:
+        stats_y = start_y
+        stat_x = lane_x + lane_count * 5 + 2
+
+    required_y = 32 if is_dp else 22
+    required_x = 100 if is_dp else 70
+
     def on_update(current_time, events, event_index, initial_bpm, resolution, auto_play):
         # Ensure key listener is running (only start once)
         use_pynput = settings.get('use_pynput', True) and KEY_LISTENER_AVAILABLE
@@ -37,20 +90,12 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
 
             # 画面サイズの確認 (DP時に統計情報を下げたため、必要なYサイズを拡張)
             max_y, max_x = stdscr.getmaxyx()
-            is_dp = (player.chart.get('mode', 'SP') == 'DP')
-            required_y = 32 if is_dp else 22
-            required_x = 100 if is_dp else 70
             if max_y < required_y or max_x < required_x:
                 stdscr.addstr(0, 2, "=== TERMINAL SIZE TOO SMALL ===", curses.A_BOLD)
                 stdscr.addstr(2, 2, f"Required size: {required_x} cols x {required_y} rows")
                 stdscr.addstr(3, 2, f"Current size : {max_x} cols x {max_y} rows")
 
-            judgement_y = judgement_y_config
-            start_y = 4
-            lane_x = 4
-            base_speed = 22.0
             speed = base_speed * settings.get('hispeed', 1.0)
-
             if getattr(player, 'timeline', None):
                 beat_duration = 60.0 / player.initial_bpm
                 scale = speed * beat_duration
@@ -63,35 +108,17 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
             stdscr.addstr(0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
             stdscr.addstr(1, 2, f"Song: {player.chart['info'].get('title', 'Unknown')} / Artist: {player.chart['info'].get('artist', 'Unknown')}")
             stdscr.addstr(2, 2, f"BPM: {current_bpm:.1f} | Time: {current_time:.2f}s | HS: {settings.get('hispeed', 1.0):.1f}")
-            #stdscr.addstr(3, 2, f"HS: {settings.get('hispeed', 1.0):.1f}")
 
-            lane_count = 16 if player.chart.get('mode', 'SP') == 'DP' else 8
             for y in range(start_y, judgement_y):
-                if lane_count == 16:
-                    stdscr.addstr(y, lane_x, "|" + "    |" * 8 + " " + "|" + "    |" * 8)
-                else:
-                    stdscr.addstr(y, lane_x, "|" + "    |" * lane_count)
-            if lane_count == 16:
-                stdscr.addstr(judgement_y, lane_x, "+" + "----+" * 8 + " " + "+" + "----+" * 8)
-            else:
-                stdscr.addstr(judgement_y, lane_x, "+" + "----+" * lane_count)
+                stdscr.addstr(y, lane_x, LANE_UNIT)
 
-            if player.chart.get('mode', 'SP') == 'DP':
-                key_names = KEY_NAMES_DP
-            elif settings['opt_scratch_side'] == "right":
-                key_names = KEY_NAMES_RIGHT
-            else:
-                key_names = KEY_NAMES_LEFT
+            stdscr.addstr(judgement_y, lane_x, JUDGE_UNIT)
 
             for idx, name in enumerate(key_names):
                 lane_idx = idx
                 is_active = (current_time - player.key_pressed_time[lane_idx] < 0.12)
                 attr = curses.A_REVERSE if is_active else curses.A_NORMAL
-                if lane_count == 16 and idx >= 8:
-                    x = lane_x + 1 + idx * 5 + 2
-                else:
-                    x = lane_x + 1 + idx * 5
-                stdscr.addstr(judgement_y + 1, x, name, attr)
+                stdscr.addstr(judgement_y + 1, lane_posx(lane_idx), name, attr)
 
             if auto_play:
                 stdscr.addstr(judgement_y + 2, lane_x, "[       AUTOPLAY MODE ACTIVE       ]", curses.A_DIM)
@@ -99,13 +126,6 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                 stdscr.addstr(judgement_y + 2, lane_x, "[       MANUAL PLAY ACTIVE         ]")
 
             stdscr.addstr(judgement_y + 4, lane_x, f"Press {config.quit_key_name} to quit playing")
-
-            if player.chart.get('mode', 'SP') == 'DP':
-                stats_y = judgement_y + 5
-                stat_x = lane_x + (lane_count // 2) * 5 + 2
-            else:
-                stats_y = start_y
-                stat_x = lane_x + lane_count * 5 + 2
 
             filled_segments = int(player.gauge / 5.0)
             bar_list = []
@@ -116,19 +136,22 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
             gauge_attr = curses.A_BOLD
             if player.hard_mode:
                 gauge_mode_label = "HARD "
+                gauge_mode_label2 = "SOLID" if settings['opt_solid'] else "GAUGE"
                 if player.gauge <= 30.0:
                     gauge_attr |= curses.A_BLINK   # 低ゲージ警告
                 elif player.gauge >= 80.0:
                     gauge_attr |= curses.A_STANDOUT
             elif getattr(player, 'easy_mode', False):
                 gauge_mode_label = "EASY "
+                gauge_mode_label2 = "SOLID" if settings['opt_solid'] else "GAUGE"
                 if player.gauge >= 80.0:
                     gauge_attr |= curses.A_STANDOUT
             else:
                 gauge_mode_label = ""
+                gauge_mode_label2 = "SOLID GAUGE" if settings['opt_solid'] else "GAUGE"
                 if player.gauge >= 80.0:
                     gauge_attr |= curses.A_STANDOUT
-            stdscr.addstr(stats_y, stat_x, f"{gauge_mode_label}GAUGE: [{gauge_bar}] {player.gauge:5.1f}%", gauge_attr)
+            stdscr.addstr(stats_y, stat_x, f"{gauge_mode_label}{gauge_mode_label2}: [{gauge_bar}] {player.gauge:5.1f}%", gauge_attr)
 
             max_score = player.total_playable_notes * 2
             stdscr.addstr(stats_y + 2, stat_x, f"EX SCORE: {player.ex_score:5d} / {max_score:5d}")
@@ -179,14 +202,6 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                 if event.get('ln_state') == 'end':
                     start_ev = event.get('ln_partner')
                     if start_ev:
-                        # Use previously resolved lane_idx for end events
-                        # lane_idx already set correctly for standard and extended channels
-                        # No need to re‑lookup in player.channel_to_lane
-                        # (previous code caused KeyError for 51‑69 channels)
-                        if lane_count == 16 and lane_idx >= 8:
-                            x = lane_x + 1 + lane_idx * 5 + 2
-                        else:
-                            x = lane_x + 1 + lane_idx * 5
                         
                         target_seconds_end = event['time']
                         if getattr(player, 'timeline', None):
@@ -207,6 +222,7 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                         
                         # Draw start head (if not already hit) and end head for LNTYPE1
                         note_str = lane_chars[lane_idx]
+                        x = lane_posx(lane_idx)
                         # start head (visible when pending)
                         if start_ev.get('state', 0) == 0 and start_y <= y_start < judgement_y:
                             stdscr.addstr(y_start, x, note_str)
@@ -245,24 +261,12 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                 y = judgement_y - int((note_height - player_height) * scale)
                 if start_y <= y < judgement_y:
                     if is_measure_line:
-                        if lane_count == 16:
-                            line_str = "+" + "----+" * 8 + " " + "+" + "----+" * 8
-                        else:
-                            line_str = "+" + "----+" * lane_count
-                        stdscr.addstr(y, lane_x, line_str, curses.A_DIM)
+                        stdscr.addstr(y, lane_x, JUDGE_UNIT, curses.A_DIM)
                     else:
-                        if lane_count == 16 and lane_idx >= 8:
-                            x = lane_x + 1 + lane_idx * 5 + 2
-                        else:
-                            x = lane_x + 1 + lane_idx * 5
-                        stdscr.addstr(y, x, note_str)
+                        stdscr.addstr(y, lane_posx(lane_idx), note_str)
                 elif y >= judgement_y and not is_measure_line:
                     if current_time - target_seconds < 0.08:
-                        if lane_count == 16 and lane_idx >= 8:
-                            x = lane_x + 1 + lane_idx * 5 + 2
-                        else:
-                            x = lane_x + 1 + lane_idx * 5
-                        stdscr.addstr(judgement_y, x, "FL", curses.A_REVERSE)
+                        stdscr.addstr(judgement_y, lane_posx(lane_idx), "FL", curses.A_REVERSE)
                 if y < 0:
                     break
 
@@ -292,22 +296,9 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                         player.press_key(key_to_lane[ch])
                     continue
                 # Hispeed adjustments (configurable keys)
-                speedup_key = settings.get('speedup_key', '+')
-                speeddown_key = settings.get('speeddown_key', '-')
-                def _key_code(k):
-                    # Convert a key identifier to curses key code
-                    if isinstance(k, str):
-                        uk = k.upper()
-                        if uk == 'KEY_UP':
-                            return curses.KEY_UP
-                        if uk == 'KEY_DOWN':
-                            return curses.KEY_DOWN
-                        # Fallback: single character
-                        return ord(k)
-                    return k
-                if ch == _key_code(speedup_key):
+                if ch == speedup_keycode:
                     settings['hispeed'] = min(settings.get('hispeed', 1.0) + 0.2, 100.0)
-                elif ch == _key_code(speeddown_key):
+                elif ch == speeddown_keycode:
                     settings['hispeed'] = max(settings.get('hispeed', 1.0) - 0.2, 0.2)
 
             # Process keyboard input using pynput for modifier keys

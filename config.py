@@ -247,17 +247,6 @@ def load_scratch_side() -> str:
     side = scratch_cfg.get('side', 'left').lower()
     return side if side in ('left', 'right') else 'left'
 
-# def load_auto_scratch() -> bool:
-#     """Load the auto_scratch flag from settings.toml's [play_options] section.
-#     Returns the boolean value and updates the module-level auto_scratch variable.
-#     """
-#     data = _load_toml()
-#     if not data:
-#         auto_scratch = False
-#         return auto_scratch
-#     play_opts = data.get('play_options', {})
-#     auto_scratch = play_opts.get('auto_scratch', False)
-
 def load_judgement_config() -> tuple[int, int]:
     """Load judgement_y and judgement_offset_ms from settings.toml's [judgement] section.
     Returns a tuple (judgement_y, judgement_offset_ms)."""
@@ -269,12 +258,24 @@ def load_judgement_config() -> tuple[int, int]:
     judgement_offset_ms_config = judg_cfg.get('judgement_offset_ms', 0)
     return judgement_y_config, judgement_offset_ms_config
 
-# def load_show_measure_lines() -> bool:
-#     """settings.toml の [play_options] show_measure_lines を読み込む。"""
-#     data = _load_toml()
-#     if not data:
-#         show_measure_lines = True
-#         return show_measure_lines
-#     play_opts = data.get('play_options', {})
-#     show_measure_lines = play_opts.get('show_measure_lines', True)
+def load_audio_config() -> dict:
+    """Load [audio] section from settings.toml.
+
+    Returns a dict with the following keys:
+        sample_rate (int): sampling rate in Hz (default: 24000)
+        nchannels   (int): number of channels; 1=mono, 2=stereo (default: 2)
+    """
+    data = _load_toml()
+    audio_cfg = data.get('audio', {}) if data else {}
+    sample_rate = audio_cfg.get('sample_rate', 24000)
+    nchannels   = audio_cfg.get('nchannels', 2)
+    # 値の妥当性チェック
+    if not isinstance(sample_rate, int) or sample_rate <= 0:
+        sample_rate = 24000
+    if nchannels not in (1, 2):
+        nchannels = 2
+    return {
+        'sample_rate': sample_rate,
+        'nchannels':   nchannels,
+    }
 

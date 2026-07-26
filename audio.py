@@ -4,6 +4,8 @@ import os
 import threading
 import array
 
+from config import load_audio_config
+
 class AudioEngine:
     def __init__(self):
         self.sounds = {} # {sound_id: DecodedSoundFile}
@@ -15,12 +17,17 @@ class AudioEngine:
         self._loaded_count = 0
         self._total_count = 0
 
+        # settings.toml からオーディオ設定を読み込む
+        audio_cfg = load_audio_config()
+        self.sample_rate = audio_cfg['sample_rate']
+        self.nchannels   = audio_cfg['nchannels']
+
         # PlaybackDeviceの初期化 – バッファサイズは milliseconds で指定
         # 3msは攻めすぎてノイズ多いので10msに
         self.device = miniaudio.PlaybackDevice(
             output_format=miniaudio.SampleFormat.SIGNED16,
-            nchannels=2,
-            sample_rate=24000,
+            nchannels=self.nchannels,
+            sample_rate=self.sample_rate,
             buffersize_msec=10,
         )
         
@@ -42,10 +49,11 @@ class AudioEngine:
         return (self._loaded_count, self._total_count)
 
     def _mix_generator(self):
+        nchannels = self.nchannels
         # Initial yield to receive the first frame count request
         required_frames = yield b""
         while True:
-            required_samples = required_frames * 2
+            required_samples = required_frames * nchannels
             # Initialize output buffer as a list of ints for safe mixing
             output_list = [0] * required_samples
             finished_sounds = []
@@ -59,27 +67,29 @@ class AudioEngine:
                 src_len = len(src)
                 remaining = src_len - pos
                 to_copy = min(required_samples, remaining)
-                for i in range(to_copy):
-                    output_list[i] += src[pos + i]
+                
+                # スライス抽出して加算ループを最適化
+                chunk = src[pos : pos + to_copy]
+                for i, val in enumerate(chunk):
+                    output_list[i] += val
+
                 sound["position"] += to_copy
                 if sound["position"] >= src_len:
                     finished_sounds.append(sound)
 
-            # Remove finished sounds
+            # Remove finished sounds (一括フィルタリングで O(n) 化)
             if finished_sounds:
+                finished_set = set(id(snd) for snd in finished_sounds)
                 with self.lock:
-                    for snd in finished_sounds:
-                        if snd in self.active_sounds:
-                            self.active_sounds.remove(snd)
+                    self.active_sounds = [snd for snd in self.active_sounds if id(snd) not in finished_set]
 
             # Clip and convert to signed 16‑bit array
-            output = array.array('h', [0] * required_samples)
-            for i, val in enumerate(output_list):
-                if val > 32767:
-                    val = 32767
-                elif val < -32768:
-                    val = -32768
-                output[i] = val
+            # リスト内包表記と三項演算子で高速化
+            clipped = [
+                32767 if val > 32767 else (-32768 if val < -32768 else val)
+                for val in output_list
+            ]
+            output = array.array('h', clipped)
 
             # Yield mixed audio and receive next frame request
             required_frames = yield output.tobytes()
@@ -89,12 +99,12 @@ class AudioEngine:
         if not os.path.exists(file_path):
             return False
         try:
-            # 常に SIGNED16, 2チャンネル, 24000Hz にデコードする
+            # PlaybackDevice と同一のフォーマット（SIGNED16 + 設定チャンネル数 + 設定レート）にデコードする
             sound = miniaudio.decode_file(
                 file_path,
                 output_format=miniaudio.SampleFormat.SIGNED16,
-                nchannels=2,
-                sample_rate=24000
+                nchannels=self.nchannels,
+                sample_rate=self.sample_rate
             )
             self.sounds[sound_id] = sound
             return True
@@ -103,7 +113,6 @@ class AudioEngine:
             print(f"Error loading {file_path}: {e}")
             return False
 
-    #あとでflacにも対応すべき。mp3は要らない？
     def load_wav_table(self, wav_table, base_path):
         """BMSのWAVテーブルに基づいて音源を一括ロードする（同期版）"""
         for sound_id, file_name in wav_table.items():
@@ -112,7 +121,7 @@ class AudioEngine:
             path_no_ext = os.path.join(base_path, name)
             
             loaded = False
-            for e in ['.wav', '.ogg', '.WAV', '.OGG', ext]:
+            for e in ['.wav', '.ogg', '.WAV', '.OGG', '.flac', '.FLAC', '.mp3', '.MP3', ext]:
                 full_path = path_no_ext + e
                 if os.path.exists(full_path):
                     if self.load_sound(sound_id, full_path):
@@ -136,7 +145,7 @@ class AudioEngine:
                 name, ext = os.path.splitext(file_name)
                 path_no_ext = os.path.join(base_path, name)
 
-                for e in ['.wav', '.ogg', '.WAV', '.OGG', ext]:
+                for e in ['.wav', '.ogg', '.WAV', '.OGG', '.flac', '.FLAC', '.mp3', '.MP3', ext]:
                     full_path = path_no_ext + e
                     if os.path.exists(full_path):
                         self.load_sound(sound_id, full_path)
@@ -157,18 +166,19 @@ class AudioEngine:
             with self.lock:
                 # すでに再生中の同じ sound_id の音を検索
                 matching = [snd for snd in self.active_sounds if snd.get("sound_id") == sound_id]
-                # 制限数を満たすために、古い音（matchingの先頭要素）を削除
-                if limit <= 1:
-                    for snd in matching:
-                        if snd in self.active_sounds:
-                            self.active_sounds.remove(snd)
-                else:
-                    excess = len(matching) - limit + 1
-                    if excess > 0:
-                        for i in range(excess):
-                            snd = matching[i]
-                            if snd in self.active_sounds:
-                                self.active_sounds.remove(snd)
+                # 制限数を満たすために、古い音を削除 (一括フィルタリング)
+                if matching:
+                    if limit <= 1:
+                        to_remove = set(id(snd) for snd in matching)
+                    else:
+                        excess = len(matching) - limit + 1
+                        if excess > 0:
+                            to_remove = set(id(snd) for snd in matching[:excess])
+                        else:
+                            to_remove = None
+
+                    if to_remove:
+                        self.active_sounds = [snd for snd in self.active_sounds if id(snd) not in to_remove]
 
                 self.active_sounds.append({
                     "sound_id": sound_id,
@@ -192,5 +202,5 @@ if __name__ == "__main__":
     import time
     print("Testing Audio Engine with manual mixer...")
     ae = AudioEngine()
-    print("Initialization success!")
+    print(f"Initialized: sample_rate={ae.sample_rate}, nchannels={ae.nchannels}")
     ae.close()

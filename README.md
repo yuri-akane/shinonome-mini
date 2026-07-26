@@ -9,11 +9,12 @@ A minimal console BMS player written in Python. It runs in a terminal using `cur
 - Simple configuration through `settings.toml`
 - Minimal dependencies – **miniaudio** for sound playback and **pynput** for modifier key detection
 - No network connections, No output files
+- "SOLID" gauge option: init 60%, but more harder gauge
 
 ## Dependencies
 - Python 3.10+
 - **miniaudio** – tiny cross‑platform audio library (installed via pip)
-- **pynput** – library for detecting Shift / Ctrl / Alt keys (installed via pip)
+- **pynput**(optional) – library for detecting Shift / Ctrl / Alt keys (installed via pip)
 - Standard library modules only (curses, json, re, os)
 
 ## Quick Start
@@ -43,15 +44,22 @@ python3 main.py path/to/your_chart.bms
 - **SCROLL** command is not yet supported. (->future support)
 - detect modifier keys (Shift / Ctrl / Alt) with `pynput`
 - Long note release detection (`onrelease`) is unavailable on Wayland environments, so that functionality is omitted.
-- `settings.toml` allows assigning keys (default: `z s x d …`).
-- Hispeed change button default actions have been switched to `keyup`/`keydown` for better responsiveness, and can be customized via the `settings.toml`.
-- Works best on Shift‑JIS encoded BMS files.
+- Works best on Shift‑JIS encoded BMS files. (->future support)
+
+## SOLID GAUGE
+- init:60%, clear:80%, but more resistant to both increasing and decreasing.
+- While the HARD gauge reduces the rate of decrease as it nears 0%, the SOLID gauge reduces the rate of increase as it nears 100%.
+- Increase Rate: {0%: 2/3, 50%: 1/2, 70%: 1/3, 80%: 1/4, 90%: 1/8, 95%: 1/16, 99%: 1/75} of
+normal gauge.
+- Decrease Rate: Same as HARD gauge when combined; otherwise, 1/3 of normal gauge(poor:-2%).
 
 ## Configuration (`settings.toml`)
 - **scratch.side** – `"left"` or `"right"`
-- **keys** – map each lane and scratches to your preferred keys
+- **keys** – map each lane and scratches to your preferred keys (default: `z s x d …`).
+- Hispeed change button default actions have been switched to `keyup`/`keydown` for better responsiveness, and can be customized via the `settings.toml`.
 - **play_options** – toggle auto‑play, mirror, random, easy mode, etc.
 - **judgement** – customize judgement line position and timing offset
+- If audio crackles or stutters, try a lower sample rate and nchannels = 1 (monaural) in the `audio` section.
 
 ## License
 - GPLv3
@@ -65,8 +73,9 @@ python3 main.py path/to/your_chart.bms
 - do not playback many-time with single #WAVxx definition
    - "polyphony" section @ bmson ->1.53a ok
 - #BASE (36, 62)　->1.53a ok
-- flac support
+- flac support　->1.56 ok?
 - pynput use or nouse flag by setting　->1.53b ok
+- display (none, tiny, mini) option, cmdline option
 
 ## this program doesn't support:
 - movie or image (BMP, BGA)
@@ -76,7 +85,7 @@ python3 main.py path/to/your_chart.bms
 - playlists → (planned for a separate program later)
 - #RANDOM / #IF → (maybe added later if time permits)
 - mine notes → (maybe added later if time permits)
-- invisible notes
+- ZZ mine, invisible notes, FREEZONE
 - mp3, midi
 - preview
 - pms, 774, gda → (if implemented, prioritize 5‑key/10‑key support, then 9‑key, 4‑key, 6‑key)
