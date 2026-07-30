@@ -70,7 +70,7 @@ python3 main.py path/to/your_chart.bms
 - 全く別物になっていますが、基本コンセプトをお借りしているので‑miniとさせていただきました。
 
 ## いままでやった & あとでやる
-- 基本的なbms再生(BPM変更、小節長変更、etc) -> ver1.50
+- 基本的なbms再生(BPM変更、小節長変更、STOP、ロングノート、etc) -> ver1.50
 - SCROLL命令
 - 多重再生の改善（do not playback many-time with single #WAVxx definition）
    - bmsonではpolyphonyに該当する仕様 ->1.53a ok
