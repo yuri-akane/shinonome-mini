@@ -7,6 +7,8 @@ from typing import Dict, List, Tuple, Any
 from constants import CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT
 from timing import BpmTimeline, stop_seconds, estimated_total
 
+from config import load_bms_encoding
+
 class BmsParser:
     """Parse BMS files into a structured chart representation.
     The parser extracts header information, wav table, measure multipliers,
@@ -68,7 +70,7 @@ class BmsParser:
                 info['lntype'] = int(val)
             except Exception:
                 pass
-        elif key_upper == "LNMODE":
+        elif key_upper.startswith("LNMODE"):
             try:
                 info['lnmode'] = int(val)
             except Exception:
@@ -107,13 +109,16 @@ class BmsParser:
             return
         raw_data.append((measure_idx, channel, data_str))
 
-    def parse(self, file_path: str) -> dict:
+    def parse(self, file_path: str, encoding: str = None) -> dict:
         """Parse a BMS file and return a structured chart dict.
         The method builds header info, wav table, measures multiplier, raw data,
         then computes beat timings and converts them to absolute seconds.
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"BMS file not found: {file_path}")
+
+        if encoding is None:
+            encoding = load_bms_encoding()
 
         info = {
             'title': '',
@@ -134,7 +139,7 @@ class BmsParser:
 
         base = 36
         # Pre-scan for #BASE to know if we need case sensitivity
-        with open(file_path, 'r', encoding='shift-jis', errors='ignore') as f:
+        with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
             for line in f:
                 line = line.strip()
                 if not line.startswith('#'): continue
@@ -153,7 +158,7 @@ class BmsParser:
             return raw_id.upper()
 
         # BMSは一般的にShift-JISまたはCP932が多い
-        with open(file_path, 'r', encoding='shift-jis', errors='ignore') as f:
+        with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
             for line in f:
                 line = line.strip()
                 if not line.startswith('#'): continue

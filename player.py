@@ -397,6 +397,7 @@ class Player:
 
         self.start_time = time.perf_counter()
         event_index = 0
+        miss_check_index = 0  # 見逃しMISS判定専用インデックス（event_indexとは独立して管理）
         self.current_bpm = initial_bpm
 
         # 小節長変更(02)や小節線(measure_line)を除いた、演奏・演出に関わる実質的な最終イベント時刻を算出
@@ -490,8 +491,10 @@ class Player:
             if not auto_play:
                 perf_w, great_w, good_w, bad_w = self.get_judgement_windows()
                 offset_seconds = getattr(self, 'judgement_offset_ms', 0) / 1000.0
-                #for event in events[event_index:]:
-                for event in events:
+                # 先頭の処理済みイベントをスキップしてインデックスを詰める
+                while miss_check_index < len(events) and events[miss_check_index].get('state', 0) != 0:
+                    miss_check_index += 1
+                for event in events[miss_check_index:]:
                     target_seconds = event['time']
                     # 時間順にソートされているため、まだ判定窓手前（未来）のイベントに到達したら探索中断
                     if (target_seconds + offset_seconds) - current_time > bad_w:

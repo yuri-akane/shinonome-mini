@@ -16,6 +16,8 @@ Python で実装された、ターミナル上で動作するシンプルな BMS
 - Python 3.10 以上
 - ALSA / PulseAudio 等、**miniaudio** が利用できるオーディオ環境
 - **pynput**（任意） – Shift / Ctrl / Alt キー判定のみに使用しています。
+- **numpy**（任意） – CPU負荷軽減のため、可能なら入れることをおすすめします。
+- その他標準ライブラリ (curses, json, re, os)
 
 ## セットアップ手順
 ```bash
@@ -27,7 +29,8 @@ source venv/bin/activate
 # Windows の場合: venv\\Scripts\\activate
 
 # 3. 必要パッケージをインストール
-pip3 install miniaudio pynput
+pip3 install miniaudio pynput numpy
+# pkg install python-numpy # termuxなど
 ```
 
 ## 実行例
@@ -38,12 +41,11 @@ python3 main.py path/to/your_chart.bms
 - 表示がおかしかったらterminalをfullscreenにしたりフォントサイズを小さくして調整してください。
 
 ## Notes & Caveats
-- UI は端末だけの表示で、グラフィカル UI はありません。
+- UIはterminalだけです。グラフィカルUIはありません。
 - 一部の BMS コマンドのみ対応。BMP, BGA 等はスキップします。
 - **SCROLL** コマンドは未対応です。今後実装予定です。
 - **pynput** で **Shift / Ctrl / Alt** キーの判定に対応しています。
 - Wayland 環境では `onrelease` が利用できないため、ロングノートの離した時の判定は未実装（consoleで行う限り実装不可）です。
-- bms 形式はShift‑JIS(cp932)決め打ちで読み込んでいます。昔のeuc-kr(cp949)とかutf-8は未確認です…->一応あとでsettings.tomlで設定できるようにします
 
 ## SOLIDゲージ
 - 初期値60%、80%以上でクリアですが、ゲージが増減共に硬い（増えにくく減りにくい）オプションです。
@@ -58,6 +60,7 @@ python3 main.py path/to/your_chart.bms
 - **play_options** – オートプレイ、ミラー、ランダム、イージー、ハードなどの切り替えを行います。
 - **judgement** – 判定ラインの位置やタイミングオフセットを調整します。
 - 音がブツブツ切れるときは、audioセクションでサンプリングレートを下げ、モノラルに設定してください。
+- デフォルトの文字コードにはshift-jis(cp932), euc-kr(cp949), utf-8を設定できます。
 
 ## ライセンス
 - GPLv3
@@ -66,7 +69,8 @@ python3 main.py path/to/your_chart.bms
 - こちらのプロジェクト [shinonome](https://github.com/kuroclef/shinonome) の作者様に感謝を申し上げます。
 - 全く別物になっていますが、基本コンセプトをお借りしているので‑miniとさせていただきました。
 
-## あとでやる（ver1.50以降or順次）
+## いままでやった & あとでやる
+- 基本的なbms再生(BPM変更、小節長変更、etc) -> ver1.50
 - SCROLL命令
 - 多重再生の改善（do not playback many-time with single #WAVxx definition）
    - bmsonではpolyphonyに該当する仕様 ->1.53a ok
@@ -74,7 +78,8 @@ python3 main.py path/to/your_chart.bms
 - flac対応 ->1.56 ok?
 - pynput use or nouse flag by setting　->1.53b ok
 - 画面表示オプション（none(画面なし)、tiny(ノーツのみ、表示幅・高さも縮小)、mini（通常））、コマンドラインオプション
-- bmsのデフォルトエンコーディング指定(shift-jis, euc-kr, utf-8)
+- bmsのデフォルトエンコーディング指定(shift-jis, euc-kr, utf-8) ->1.58 ok
+- numpy(cpu負荷軽減) ->1.57c ok
 
 ## minimalに保つためやらない
 - 画像・動画表示
@@ -85,7 +90,8 @@ python3 main.py path/to/your_chart.bms
 - #RANDOM〜#IF命令 -> 余裕ができたらやるかも？
 - 地雷ノーツ -> 余裕ができたらやるかも？
 - ZZ（即死）地雷、不可視ノーツ、FREEZONE
-- mp3, midi対応
+- midi対応
+- mp3は再生できますが音ズレがあるのでおすすめしません
 - preview
 - pms, 774, gda形式 ->やるなら5keys/10keysが先, その後9keys, 4k, 6kまで
 - ロングノートは見た目だけです（キーを離した判定ができないため）。

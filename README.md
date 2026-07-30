@@ -7,14 +7,15 @@ A minimal console BMS player written in Python. It runs in a terminal using `cur
 - Supports **SP(7keys), DP(14keys)**
 - Supports **AUTO PLAY / MIRROR / RANDOM / EASY / HARD** options
 - Simple configuration through `settings.toml`
-- Minimal dependencies – **miniaudio** for sound playback and **pynput** for modifier key detection
+- Minimal dependencies – **miniaudio** for sound playback and optional **pynput** and **numpy**
 - No network connections, No output files
 - "SOLID" gauge option: init 60%, but more harder gauge
 
 ## Dependencies
 - Python 3.10+
-- **miniaudio** – tiny cross‑platform audio library (installed via pip)
-- **pynput**(optional) – library for detecting Shift / Ctrl / Alt keys (installed via pip)
+- **miniaudio** – tiny cross‑platform audio library
+- **pynput**(optional) – library for detecting Shift / Ctrl / Alt keys
+- **numpy**(optional) – for less cpu usage 
 - Standard library modules only (curses, json, re, os)
 
 ## Quick Start
@@ -27,7 +28,8 @@ source venv/bin/activate
 # On Windows use: venv\\Scripts\\activate
 
 # 3. Install the required package
-pip3 install miniaudio pynput
+pip3 install miniaudio pynput numpy
+# pkg install python-numpy # termux or so
 ```
 
 ## Running the game
@@ -36,7 +38,7 @@ python3 main.py path/to/your_chart.bms
 ```
 - The player will launch a curses UI.
 - Press **Esc** to quit (configurable via settings).
-- If the display looks odd, set the terminal to fullscreen.
+- If the display looks odd, set the terminal to fullscreen or smaller font-size.
 
 ## Notes & Caveats
 - The UI is terminal‑only; no graphical interface.
@@ -44,7 +46,6 @@ python3 main.py path/to/your_chart.bms
 - **SCROLL** command is not yet supported. (->future support)
 - detect modifier keys (Shift / Ctrl / Alt) with `pynput`
 - Long note release detection (`onrelease`) is unavailable on Wayland environments, so that functionality is omitted.
-- Works best on Shift‑JIS encoded BMS files. (->future support)
 
 ## SOLID GAUGE
 - init:60%, clear:80%, but more resistant to both increasing and decreasing.
@@ -60,6 +61,7 @@ normal gauge.
 - **play_options** – toggle auto‑play, mirror, random, easy mode, etc.
 - **judgement** – customize judgement line position and timing offset
 - If audio crackles or stutters, try a lower sample rate and nchannels = 1 (monaural) in the `audio` section.
+- Default encodings can be set to shift-jis(cp932), euc-kr(cp949), utf-8
 
 ## License
 - GPLv3
@@ -68,7 +70,8 @@ normal gauge.
 - Thanks deeply to the original [shinonome](https://github.com/kuroclef/shinonome) author.
 - Although this is a completely different project, it borrows the core concept, hence the "-mini" suffix.
 
-## future support(after ver1.50)
+## history and future support
+- basic bms command to play (bpm change or so) -> ver1.50
 - SCROLL
 - do not playback many-time with single #WAVxx definition
    - "polyphony" section @ bmson ->1.53a ok
@@ -76,6 +79,8 @@ normal gauge.
 - flac support　->1.56 ok?
 - pynput use or nouse flag by setting　->1.53b ok
 - display (none, tiny, mini) option, cmdline option
+- default encoding settings (shift-jis, euc-kr, utf-8) ->1.58 ok
+- numpy for less cpu usage ->1.57c ok
 
 ## this program doesn't support:
 - movie or image (BMP, BGA)
@@ -86,7 +91,8 @@ normal gauge.
 - #RANDOM / #IF → (maybe added later if time permits)
 - mine notes → (maybe added later if time permits)
 - ZZ mine, invisible notes, FREEZONE
-- mp3, midi
+- midi
+- mp3 may cause delay, same as other player.
 - preview
 - pms, 774, gda → (if implemented, prioritize 5‑key/10‑key support, then 9‑key, 4‑key, 6‑key)
 - Full long‑note support (sorry i can't...)

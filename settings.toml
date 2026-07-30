@@ -1,4 +1,4 @@
-# settings.toml – configuration for Shinonome Mini ver1.57+
+# settings.toml – configuration for Shinonome Mini ver1.58+
 
 [scratch]
 side="left" #"left" or "right"
@@ -83,3 +83,8 @@ judgement_offset_ms = 0   # 判定タイミングのオフセット（ミリ秒�
 [audio]
 sample_rate = 24000   # サンプリングレート: 8000/12000/16000/22050/24000/32000/44100/48000 など
 nchannels = 2         # チャンネル数: 1=モノラル, 2=ステレオ
+
+# BMSファイルテキスト読み込み設定
+[bms]
+encoding = "cp932"    # bmsテキストのエンコーディング ("cp932" / "cp949" / "utf-8")
+
