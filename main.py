@@ -133,6 +133,7 @@ def main(stdscr):
         opt_hard = play_opts.get('hard_gauge', False)
         opt_solid = play_opts.get('solid_gauge', False)
         opt_show_measure_lines = play_opts.get('show_measure_lines', True)
+        opt_show_ln_end_head = play_opts.get('show_ln_end_head', True)
         opt_hispeed = play_opts.get('hispeed', 1.0)  # Read hispeed from settings
         opt_autoscratch = play_opts.get('auto_scratch', False)
         # Configurable hispeed key bindings
@@ -322,7 +323,9 @@ def main(stdscr):
                     'speedup_key': speedup_key,
                     'speeddown_key': speeddown_key,
                     'use_pynput': opt_use_pynput,
-                    'opt_solid': opt_solid
+                    'opt_solid': opt_solid,
+                    'show_ln_end_head': opt_show_ln_end_head
+
                 }
                 on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE, judgement_y_config, settings, lane_chars)
                 player.play(on_update=on_update, auto_play=opt_autoplay)

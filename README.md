@@ -52,7 +52,7 @@ python3 main.py path/to/your_chart.bms
 - While the HARD gauge reduces the rate of decrease as it nears 0%, the SOLID gauge reduces the rate of increase as it nears 100%.
 - Increase Rate: {0%: 2/3, 50%: 1/2, 70%: 1/3, 80%: 1/4, 90%: 1/8, 95%: 1/16, 99%: 1/75} of
 normal gauge.
-- Decrease Rate: Same as HARD gauge when combined; otherwise, 1/3 of normal gauge(poor:-2%).
+- Decrease Rate: Same as HARD gauge when combined; otherwise, 1/3 of normal gauge(poor:-2%, and less(half) with EASY).
 
 ## Configuration (`settings.toml`)
 - **scratch.side** – `"left"` or `"right"`

@@ -78,6 +78,28 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
     required_y = 32 if is_dp else 22
     required_x = 100 if is_dp else 70
 
+    def calculate_y(event, player, judgement_y, player_height, scale):
+        """イベントの時刻/ビートから描画上のY座標と秒数を計算する"""
+        target_seconds = event['time']
+        if getattr(player, 'timeline', None):
+            note_height = player.timeline.get_height_at_beat(event['beat'])
+        else:
+            note_height = target_seconds
+        y = judgement_y - int((note_height - player_height) * scale)
+        return y, target_seconds
+
+    def get_lane_index(channel, player):
+        """チャンネル名からレーン番号を判定して返す。該当しない場合はNone"""
+        if channel in player.channel_to_lane:
+            return player.channel_to_lane[channel]
+
+        # 拡張チャンネル (51-69) の処理
+        if channel.isdigit() and 51 <= int(channel) <= 69:
+            base_chan = str(int(channel) - 40)
+            return player.channel_to_lane.get(base_chan)
+
+        return None
+
     def on_update(current_time, events, event_index, initial_bpm, resolution, auto_play):
         # Ensure key listener is running (only start once)
         use_pynput = settings.get('use_pynput', True) and KEY_LISTENER_AVAILABLE
@@ -180,95 +202,88 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                 if player.combo >= 3 and player.last_judgement in ["PERFECT", "GREAT", "GOOD"]:
                     stdscr.addstr(judgement_y + 7, lane_x + 14, f"{player.combo} COMBO", curses.A_BOLD)
 
-            # Draw long note bodies first
+            # Draw measure lines first (Background layer)
+            if getattr(player, 'show_measure_lines', True):
+                for i in range(event_index, len(events)):
+                    event = events[i]
+                    if event.get('state', 0) != 0 or event.get('channel') != 'measure_line':
+                        continue
+
+                    y, _ = calculate_y(event, player, judgement_y, player_height, scale)
+                    if y < 0: break # これ以降のイベントは画面外なので終了
+                    if start_y <= y < judgement_y:
+                        stdscr.addstr(y, lane_x, JUDGE_UNIT, curses.A_DIM)
+
+            # Draw long note bodies (Foreground layer1)
             for i in range(event_index, len(events)):
                 event = events[i]
                 if event.get('state', 0) != 0:
                     continue
+
                 channel = event.get('channel')
-                if not channel:
+                lane_idx = get_lane_index(channel, player) if channel else None
+                if lane_idx is None:
                     continue
-                # Support standard channels and extended 51-69 channels
-                if channel in player.channel_to_lane:
-                    lane_idx = player.channel_to_lane[channel]
-                elif channel.isdigit() and 51 <= int(channel) <= 69:
-                    # Map extended channels to their base lane by subtracting 40 (e.g., 51 -> 11)
-                    base_chan = str(int(channel) - 40)
-                    lane_idx = player.channel_to_lane.get(base_chan)
-                    if lane_idx is None:
-                        continue
-                else:
-                    continue
+
+                # ロングノーツの終点イベントである場合のみ処理
                 if event.get('ln_state') == 'end':
                     start_ev = event.get('ln_partner')
-                    if start_ev:
-                        
-                        target_seconds_end = event['time']
-                        if getattr(player, 'timeline', None):
-                            note_height_end = player.timeline.get_height_at_beat(event['beat'])
-                        else:
-                            note_height_end = target_seconds_end
-                        y_end = judgement_y - int((note_height_end - player_height) * scale)
-                        
-                        if start_ev.get('state', 0) == 1:
-                            y_start = judgement_y
-                        else:
-                            target_seconds_start = start_ev['time']
-                            if getattr(player, 'timeline', None):
-                                note_height_start = player.timeline.get_height_at_beat(start_ev['beat'])
-                            else:
-                                note_height_start = target_seconds_start
-                            y_start = judgement_y - int((note_height_start - player_height) * scale)
-                        
-                        # Draw start head (if not already hit) and end head for LNTYPE1
-                        note_str = lane_chars[lane_idx]
-                        x = lane_posx(lane_idx)
-                        # start head (visible when pending)
-                        if start_ev.get('state', 0) == 0 and start_y <= y_start < judgement_y:
-                            stdscr.addstr(y_start, x, note_str)
-                        # end head (visible when pending)
-                        if event.get('state', 0) == 0 and start_y <= y_end < judgement_y:
-                            stdscr.addstr(y_end, x, note_str)
-                        # draw long body
-                        for y_body in range(max(start_y, y_end + 1), min(judgement_y, y_start)):
-                            stdscr.addstr(y_body, x, " |")
+                    if not start_ev:
+                        continue
 
+                    # 1. 座標計算 (終点と始点)
+                    y_end, _ = calculate_y(event, player, judgement_y, player_height, scale)
+
+                    if start_ev.get('state', 0) == 1:
+                        y_start = judgement_y
+                    else:
+                        y_start, _ = calculate_y(start_ev, player, judgement_y, player_height, scale)
+                        
+                    # Draw start head (if not already hit) and end head for LNTYPE1
+                    note_str = lane_chars[lane_idx]
+                    x = lane_posx(lane_idx)
+
+                    # start head (visible when pending)
+                    if start_ev.get('state', 0) == 0 and start_y <= y_start < judgement_y:
+                        stdscr.addstr(y_start, x, note_str)
+                    # end head (visible when pending) - controlled by show_ln_end_head
+                    if event.get('state', 0) == 0 and start_y <= y_end < judgement_y:
+                        if settings.get('show_ln_end_head'):
+                            stdscr.addstr(y_end, x, note_str)#end_headと書いてあるが、実際のノーツ表示はここではないらしい。要調査
+                        else:
+                            stdscr.addstr(y_end, x, " |")
+                    # draw long body
+                    for y_body in range(max(start_y, y_end + 1), min(judgement_y, y_start)):
+                        stdscr.addstr(y_body, x, " |")
+
+
+            # Draw notes (Foreground layer2)
             for i in range(event_index, len(events)):
                 event = events[i]
                 if event.get('state', 0) != 0:
                     continue
+
                 channel = event.get('channel')
-                is_measure_line = (channel == 'measure_line')
-                if is_measure_line and not getattr(player, 'show_measure_lines', True):
+                # Skip measure lines (already drawn in first pass)
+                if channel == 'measure_line':
                     continue
-                if not is_measure_line:
-                    # Support standard and extended channels for rendering start notes
-                    if channel in player.channel_to_lane:
-                        lane_idx = player.channel_to_lane[channel]
-                    elif channel.isdigit() and 51 <= int(channel) <= 69:
-                        base_chan = str(int(channel) - 40)
-                        lane_idx = player.channel_to_lane.get(base_chan)
-                        if lane_idx is None:
-                            continue
-                    else:
-                        continue
-                    note_str = lane_chars[lane_idx]
-                target_seconds = event['time']
-                if getattr(player, 'timeline', None):
-                    note_height = player.timeline.get_height_at_beat(event['beat'])
-                else:
-                    note_height = target_seconds
-                y = judgement_y - int((note_height - player_height) * scale)
+
+                # Support standard and extended channels for rendering start notes
+                lane_idx = get_lane_index(channel, player)
+                if lane_idx is None:
+                    continue
+
+                y, target_seconds = calculate_y(event, player, judgement_y, player_height, scale)
+                if y < 0: break # これ以降のイベントは画面外なので終了
+
+                note_str = lane_chars[lane_idx]
+                x_pos = lane_posx(lane_idx)
+
                 if start_y <= y < judgement_y:
-                    if is_measure_line:
-                        stdscr.addstr(y, lane_x, JUDGE_UNIT, curses.A_DIM)
-                    else:
-                        stdscr.addstr(y, lane_posx(lane_idx), note_str)
-                elif y >= judgement_y and not is_measure_line:
+                    stdscr.addstr(y, x_pos, note_str)
+                elif y >= judgement_y:
                     if current_time - target_seconds < 0.08:
-                        stdscr.addstr(judgement_y, lane_posx(lane_idx), "FL", curses.A_REVERSE)
-                if y < 0:
-                    break
+                        stdscr.addstr(judgement_y, x_pos, "FL", curses.A_REVERSE)
 
             beat_seconds = 60.0 / initial_bpm
             beat_number = int(current_time / beat_seconds)
