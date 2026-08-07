@@ -40,15 +40,23 @@ def apply_measure_multiplier(player: Any, event: dict) -> None:
     player.current_measure_multiplier = event["measure_mult"]
 
 
+def apply_scroll_change(player: Any, event: dict) -> None:
+    """Apply a SCROLL multiplier change event."""
+    player.current_scroll = event["scroll"]
+
+
 def process_control_event(player: Any, event: dict, auto_play: bool) -> bool:
     """Dispatch a control event.
 
-    Returns ``True`` if the event was handled (i.e. it was a BPM or measure
-    change or STOP command).  ``auto_play`` is passed through so the function signature mirrors
+    Returns ``True`` if the event was handled (i.e. it was a BPM, measure,
+    SCROLL change or STOP command).  ``auto_play`` is passed through so the function signature mirrors
     the original inline logic – callers can ignore it if they wish.
     """
     if "bpm" in event:
         apply_bpm_change(player, event)
+        return True
+    if "scroll" in event or event.get("channel") == "SC":
+        apply_scroll_change(player, event)
         return True
     if event.get("channel") == "02" and "measure_mult" in event:
         apply_measure_multiplier(player, event)

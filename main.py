@@ -6,8 +6,9 @@ import tomllib
 from pathlib import Path
 from audio import AudioEngine
 from player import Player
-#from config import load_key_config, load_quit_key, load_scratch_side, load_judgement_config, load_auto_scratch, load_modifier_keys, _load_toml
-from config import load_key_config, load_quit_key, load_scratch_side, load_judgement_config, load_modifier_keys, _load_toml
+# Import new helper modules
+from helpers.load_initial_settings import load_initial_settings
+from helpers.prepare_game_start import prepare_game_start
 import config
 from on_update import make_on_update
 import random
@@ -16,6 +17,8 @@ from constants import (
     LANE_CHARS_LEFT, LANE_CHARS_RIGHT,
     KEY_NAMES_DP, KEY_NAMES_RIGHT, KEY_NAMES_LEFT
 )
+# Added imports for missing functions used in main()
+from config import load_key_config, load_modifier_keys
 
 def _show_game_over(stdscr, player, quit_key_code):
     """HARDゲージが0%に達したときのGAME OVER画面を表示する。
@@ -108,59 +111,34 @@ def main(stdscr):
         stdscr.addstr(4, 2, "Please specify a BMS file as an argument.")
         stdscr.addstr(5, 2, "Example: python3 main.py path/to/song.bms")
 
+    # Load initial settings via helper
+    init_settings = load_initial_settings(player)
 
-    opt_scratch_side = load_scratch_side()
-    # SP時にスクラッチ位置に応じてマッピングを切替 (DPは常に左右固定)
-    if player.chart and player.chart.get('mode', 'SP') == 'SP' and opt_scratch_side == "right":
-        channel_to_lane = CHANNEL_TO_LANE_RIGHT.copy()
-        lane_chars = LANE_CHARS_RIGHT.copy()
-    else:
-        channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
-        lane_chars = LANE_CHARS_LEFT.copy()
-    # Sync player mapping
-    is_dp = (player.chart.get('mode', 'SP') == 'DP') if player.chart else False
-    KEY_TO_LANE = load_key_config(opt_scratch_side, is_dp=is_dp)
-    quit_key_code = load_quit_key()
-    judgement_y_config, judgement_offset_ms_config = load_judgement_config()
+    opt_scratch_side = init_settings['opt_scratch_side']
+    channel_to_lane = init_settings['channel_to_lane']
+    lane_chars = init_settings['lane_chars']
+    is_dp = init_settings['is_dp']
+    KEY_TO_LANE = init_settings['KEY_TO_LANE']
+    quit_key_code = init_settings['quit_key_code']
+    judgement_y_config = init_settings['judgement_y_config']
+    judgement_offset_ms_config = init_settings['judgement_offset_ms_config']
 
-    try:
-        data = _load_toml()
-        play_opts = data.get('play_options', {})
-        opt_autoplay = play_opts.get('autoplay', False)
-        opt_mirror = play_opts.get('mirror', False)
-        opt_random = play_opts.get('random', False)
-        opt_easy = play_opts.get('easy_mode', False)
-        opt_hard = play_opts.get('hard_gauge', False)
-        opt_solid = play_opts.get('solid_gauge', False)
-        opt_show_measure_lines = play_opts.get('show_measure_lines', True)
-        opt_show_ln_end_head = play_opts.get('show_ln_end_head', True)
-        opt_hispeed = play_opts.get('hispeed', 1.0)  # Read hispeed from settings
-        opt_autoscratch = play_opts.get('auto_scratch', False)
-        # Configurable hispeed key bindings
-        speedup_key = data.get('speedup_key', 'KEY_UP')
-        speeddown_key = data.get('speeddown_key', 'KEY_DOWN')
-        def _key_code(k):
-            if isinstance(k, str):
-                uk = k.upper()
-                if uk == 'KEY_UP':
-                    return curses.KEY_UP
-                if uk == 'KEY_DOWN':
-                    return curses.KEY_DOWN
-                return ord(k)
-            return k
-        speedup_code = _key_code(speedup_key)
-        speeddown_code = _key_code(speeddown_key)
-    except Exception: #何かひどいことが起きたときのfallback
-        opt_autoplay = True
-        opt_mirror = False
-        opt_random = False
-        opt_easy = False
-        opt_hard = False
-        opt_solid = False
-        opt_show_measure_lines = True
-        opt_hispeed = 1.0
-        opt_scratch_side = "left"
-        opt_autoscratch = False
+    opt_autoplay = init_settings['opt_autoplay']
+    opt_mirror = init_settings['opt_mirror']
+    opt_random = init_settings['opt_random']
+    opt_easy = init_settings['opt_easy']
+    opt_hard = init_settings['opt_hard']
+    opt_solid = init_settings['opt_solid']
+    opt_show_measure_lines = init_settings['opt_show_measure_lines']
+    opt_show_ln_end_head = init_settings.get('opt_show_ln_end_head', True)
+    opt_hispeed = init_settings['opt_hispeed']
+    opt_autoscratch = init_settings['opt_autoscratch']
+
+    speedup_code = init_settings.get('speedup_code')
+    speeddown_code = init_settings.get('speeddown_code')
+
+    # Expose play options for later use
+    play_opts = init_settings.get('play_opts', {})
 
     running = True
     while running:
@@ -239,95 +217,33 @@ def main(stdscr):
             elif not is_dp_mode and key in (ord('l'), ord('L')):
                 opt_scratch_side = "right" if opt_scratch_side == "left" else "left"
             elif key in (10, 13) and player.is_audio_ready:  # Enter key to start play (音声ロード完了後のみ受付け)
-                # 決定されたスクラッチサイドに合わせて、キー構成とチャンネルマッピングを再生成する
-                #config.scratch_side = opt_scratch_side
+                # Prepare game start using helper
+                result = prepare_game_start(player,
+                                            opt_scratch_side,
+                                            channel_to_lane,
+                                            lane_chars,
+                                            KEY_TO_LANE,
+                                            judgement_y_config,
+                                            judgement_offset_ms_config,
+                                            opt_autoscratch,
+                                            opt_hard,
+                                            opt_easy,
+                                            opt_solid,
+                                            opt_show_measure_lines,
+                                            opt_show_ln_end_head,
+                                            opt_hispeed,
+                                            speedup_code,
+                                            speeddown_code,
+                                            play_opts,
+                                            opt_mirror,   # new argument
+                                            opt_random)   # new argument
+                channel_to_lane = result['channel_to_lane']
+                lane_chars = result['lane_chars']
+                KEY_TO_LANE = result['KEY_TO_LANE']
+                settings = result['settings']
 
-                # Determine initial lane mapping based: scratch side
-                if not is_dp_mode and opt_scratch_side == "right":
-                    channel_to_lane = CHANNEL_TO_LANE_RIGHT.copy()
-                    lane_chars = LANE_CHARS_RIGHT.copy()
-                else:
-                    channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
-                    lane_chars = LANE_CHARS_LEFT.copy()
-                # Recompute keyboard-to-lane mapping to match the selected scratch side
-                KEY_TO_LANE = load_key_config(opt_scratch_side, is_dp=is_dp_mode)
-                # Sync player mapping
-                player.channel_to_lane = channel_to_lane
-
-                max_lane = 15 if player.chart.get('mode', 'SP') == 'DP' else 7
-                # Determine scratch lanes based on mode and side
-                if player.chart.get('mode', 'SP') == 'DP':
-                    scratch_lanes = {0, max_lane}
-                else:
-                    scratch_lanes = {7} if opt_scratch_side == "right" else {0}
-                key_lanes = [i for i in range(max_lane + 1) if i not in scratch_lanes]
-                lane_map = {}
-                if opt_random:
-                    if player.chart.get('mode', 'SP') == 'DP':
-                        # DP: split randomization into left (1-7) and right (8-14) groups
-                        left_keys = list(range(1, 8))
-                        right_keys = list(range(8, max_lane))  # max_lane is 15, so up to 14
-                        shuffled_left = left_keys[:]
-                        shuffled_right = right_keys[:]
-                        random.shuffle(shuffled_left)
-                        random.shuffle(shuffled_right)
-                        lane_map = {}
-                        lane_map.update(dict(zip(left_keys, shuffled_left)))
-                        lane_map.update(dict(zip(right_keys, shuffled_right)))
-                    else:
-                        shuffled = key_lanes[:]
-                        random.shuffle(shuffled)
-                        lane_map = dict(zip(key_lanes, shuffled))
-                elif opt_mirror:
-                    # Mirror mapping differs for SP and DP modes
-                    if player.chart.get('mode', 'SP') == 'DP':
-                        # DP: exclude both scratch lanes (0 and max_lane=15), map 1↔7, 2↔6, ..., 7↔1, 8↔14, 9↔13, ..., 14↔8
-                        lane_map = {lane: (max_lane // 2 + 1 - lane) if lane <= (max_lane // 2) else (max_lane + max_lane // 2 - lane) for lane in key_lanes}
-                    else:
-                        # SP: mirror mapping depends on scratch side
-                        if opt_scratch_side == "right":
-                            # Scratch lane is max_lane (7); playable lanes are 0..max_lane-1
-                            lane_map = {lane: (max_lane - 1 - lane) for lane in key_lanes}
-                        else:
-                            # Scratch lane is 0; playable lanes are 1..max_lane
-                            lane_map = {lane: (max_lane + 1 - lane) for lane in key_lanes}
-                # Apply lane_map to note channel mapping and lane characters
-                if lane_map:
-                    # Remap note channels to new lanes for mirrored/random behavior.
-                    channel_to_lane = {ch: lane_map.get(lane, lane) for ch, lane in channel_to_lane.items()}
-                # Synchronize Player mapping after lane remap
-                player.channel_to_lane = channel_to_lane
-                # KEY_TO_LANE (keyboard input) remains unchanged to preserve key positions and highlights
-
-                player.auto_scratch = opt_autoscratch
-                # EASYとHARDは排他。両方Trueの場合はHARDを優先する。
-                player.hard_mode = opt_hard
-                player.easy_mode = opt_easy and not opt_hard
-                player.solid_gauge = opt_solid
-                player.show_measure_lines = opt_show_measure_lines
-                player.judgement_offset_ms = judgement_offset_ms_config
-
-                # Pass mutable settings dict to on_update for runtime hispeed changes
-                mod_keys = load_modifier_keys()
-                if 'shift_r' not in mod_keys:
-                    # In SP mode, right scratch is lane 7 regardless of side
-                    mod_keys['shift_r'] = 7
-                # Load configurable hispeed keys from play options
-                speedup_key = play_opts.get('speedup_key', 'KEY_UP')
-                speeddown_key = play_opts.get('speeddown_key', 'KEY_DOWN')
-                opt_use_pynput = config.load_use_pynput()
-                settings = {
-                    'hispeed': opt_hispeed,
-                    'opt_scratch_side': opt_scratch_side,
-                    'modifier_keys': mod_keys,
-                    'speedup_key': speedup_key,
-                    'speeddown_key': speeddown_key,
-                    'use_pynput': opt_use_pynput,
-                    'opt_solid': opt_solid,
-                    'show_ln_end_head': opt_show_ln_end_head
-
-                }
-                on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE, judgement_y_config, settings, lane_chars)
+                on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE,
+                                          judgement_y_config, settings, lane_chars)
                 player.play(on_update=on_update, auto_play=opt_autoplay)
                 if player.is_dead:
                     _show_game_over(stdscr, player, quit_key_code)

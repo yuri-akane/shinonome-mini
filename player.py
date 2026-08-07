@@ -17,6 +17,7 @@ class Player:
         self.easy_mode = False
         self.hard_mode = False
         self.solid_gauge = False
+        self.current_scroll = 1.0
         
         # ゲージ・スコア・統計情報
         self.total_playable_notes = 0  # 総プレイノーツ数

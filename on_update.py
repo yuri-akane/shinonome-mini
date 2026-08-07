@@ -248,8 +248,8 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                         stdscr.addstr(y_start, x, note_str)
                     # end head (visible when pending) - controlled by show_ln_end_head
                     if event.get('state', 0) == 0 and start_y <= y_end < judgement_y:
-                        if settings.get('show_ln_end_head'):
-                            stdscr.addstr(y_end, x, note_str)#end_headと書いてあるが、実際のノーツ表示はここではないらしい。要調査
+                        if settings.get('show_ln_end_head', False):
+                            stdscr.addstr(y_end, x, note_str)
                         else:
                             stdscr.addstr(y_end, x, " |")
                     # draw long body
@@ -266,6 +266,10 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                 channel = event.get('channel')
                 # Skip measure lines (already drawn in first pass)
                 if channel == 'measure_line':
+                    continue
+
+                # Skip LN end heads in standard note loop if end head display is disabled
+                if event.get('ln_state') == 'end' and not settings.get('show_ln_end_head', False):
                     continue
 
                 # Support standard and extended channels for rendering start notes

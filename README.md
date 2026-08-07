@@ -91,6 +91,7 @@ normal gauge.
 - #RANDOM / #IF → (maybe added later if time permits)
 - mine notes → (maybe added later if time permits)
 - ZZ mine, invisible notes, FREEZONE
+- minus BPM, minus SCROLL
 - midi
 - mp3 may cause delay, same as other player.
 - preview

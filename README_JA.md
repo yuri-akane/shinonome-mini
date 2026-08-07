@@ -72,7 +72,7 @@ python3 main.py path/to/your_chart.bms
 
 ## いままでやった & あとでやる
 - 基本的なbms再生(BPM変更、小節長変更、STOP、ロングノート、etc) -> ver1.50
-- SCROLL命令
+- SCROLL命令 ->1.59e++ ok?
 - 多重再生の改善（do not playback many-time with single #WAVxx definition）
    - bmsonではpolyphonyに該当する仕様 ->1.53a ok
 - BASE命令（36,62） ->1.53a ok
@@ -84,21 +84,28 @@ python3 main.py path/to/your_chart.bms
 
 ## minimalに保つためやらない
 - 画像・動画表示
-- hidden/sudden
+- hidden/sudden, S-RAN/H-RAN/R-RAN, etc
 - スコア記録・保存・送信、ファイル出力
 - IR等オンライン接続
 - プレイリスト -> ※別のプログラムであとでやる
 - #RANDOM〜#IF命令 -> 余裕ができたらやるかも？
 - 地雷ノーツ -> 余裕ができたらやるかも？
 - ZZ（即死）地雷、不可視ノーツ、FREEZONE
+- マイナスBPM、負のSCROLL
+   - 負のSCROLL（ノーツの逆流）は譜面によっては動作することを確認しています。
+   - 私が十分な量の#SCROLL(bms)やscroll_event(bmson)を使ったbmsを持っていないので仮対応です。
 - midi対応
 - mp3は再生できますが音ズレがあるのでおすすめしません
 - preview
 - pms, 774, gda形式 ->やるなら5keys/10keysが先, その後9keys, 4k, 6kまで
-- ロングノートは見た目だけです（キーを離した判定ができないため）。
+- ロングノートは見た目だけです（キーを離した判定ができないため）。そのためLN,CN,HCNの区別もありません。
    - 押しっぱなしにすると次のノートでBADをとられる場合があるので少し早めに離してください。
+- ミュージックボックスを使う（昔の）bms
+- #WAVに絶対パスや親ディレクトリを指定したbms -> サブフォルダ程度なら対応します（あとで。）
 
 ## todoあとで確認
+- ロングノートの複雑な仕様の再確認（lnobj, lnmode, ln_type）
 - bmsonのときbpm確認（1ずれない？）
 - bmsonのとき実質無音ノーツになってる？
 - global変数使うな
+- *.pyが散らばってきたのでディレクトリ分ける

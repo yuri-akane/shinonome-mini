@@ -67,9 +67,9 @@ speeddown_key = "KEY_DOWN"
 #speeddown_key = "q"
 solid_gauge = false  # SOLIDゲージ（初期値60%、クリア80%。ゲージ増減どちらも抑制、ゲージが100%に近いほど増加量減）
 
-# 未実装：ロングノートの終端をノーツとして表示するか([not supported now]Show end head of long notes)
-# 密度が高いとロングノートなのか連打なのか区別できなくなるので「終端非表示」のほうがよい。
-#show_ln_end_head = true
+# ロングノートの終端をノーツとして表示するか(Show end head of long notes)
+# 密度が高いとロングノートなのか連打なのか区別できなくなるので「終端非表示」のほうがよいです。
+show_ln_end_head = false
 
 # quit key configuration
 [quit]

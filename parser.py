@@ -16,7 +16,7 @@ class BmsParser:
     """
     def __init__(self):
         self.header_re = re.compile(r"^#(\w+)\s+(.+)")
-        self.data_re = re.compile(r"^#(\d{3})(\d{2}):(.+)")
+        self.data_re = re.compile(r"^#(\d{3})([0-9a-zA-Z]{2}):(.+)")
 
     def _parse_header(self, line: str, info: dict, wav_table: dict, base: int) -> None:
         """Parse a header line and update info or wav_table.
@@ -56,6 +56,12 @@ class BmsParser:
             id_36 = clean_id(key[4:])
             try:
                 info['stop_table'][id_36] = float(val)
+            except Exception:
+                pass
+        elif key_upper.startswith("SCROLL") and len(key_upper) > 6:
+            id_36 = clean_id(key[6:])
+            try:
+                info['scroll_table'][id_36] = float(val)
             except Exception:
                 pass
         elif key_upper == "RANK":
@@ -128,6 +134,7 @@ class BmsParser:
             'total': None,
             'bpm_table': {},
             'stop_table': {},
+            'scroll_table': {},
             'lnobj': None,
             'lntype': 1,
             'lnmode': 1,
@@ -219,6 +226,19 @@ class BmsParser:
                     ref_key = clean_id(obj)
                     if ref_key in info['stop_table']:
                         stop_val = info['stop_table'][ref_key]
+                elif channel.upper() == "SC":
+                    # SCROLLテーブルから参照
+                    ref_key = clean_id(obj)
+                    if ref_key in info['scroll_table']:
+                        scroll_val = info['scroll_table'][ref_key]
+                        event_data = {
+                            'beat': beat,
+                            'time': 0.0,
+                            'channel': 'SC',
+                            'scroll': scroll_val
+                        }
+                        events.append(event_data)
+                        continue
 
                 event_data = {
                     'beat': beat,
@@ -355,7 +375,7 @@ class BmsParser:
         # BPM変更は同じbeatにある音符より先に評価し、STOPは音符が再生された後に停止するため音符より後に評価するべき
         def get_event_priority(ev):
             ch = ev.get('channel', 'XX')
-            if ch in ("03", "08"): return 0  # BPM change first
+            if ch in ("03", "08") or ch == "SC": return 0  # BPM / SCROLL change first
             if ch == "measure_line": return 1.5
             if ch == "09": return 3          # STOP last (after note channels at 2)
             return 2                         # Notes / Sound channels last
@@ -436,17 +456,21 @@ class BmsParser:
         # Construct BpmTimeline
         bpm_timeline_events = []
         stop_timeline_events = []
+        scroll_timeline_events = []
         for ev in events:
             if 'bpm' in ev:
                 bpm_timeline_events.append((ev['beat'], ev['bpm']))
             if 'stop' in ev:
                 stop_timeline_events.append((ev['beat'], ev['stop']))
+            if 'scroll' in ev:
+                scroll_timeline_events.append((ev['beat'], ev['scroll']))
                 
         timeline = BpmTimeline(
             initial_bpm=info['bpm'],
             bpm_events=bpm_timeline_events,
             stop_events=stop_timeline_events,
-            measures_multiplier=measures_multiplier
+            measures_multiplier=measures_multiplier,
+            scroll_events=scroll_timeline_events
         )
 
         # Generate default channel_to_lane mapping based on mode and scratch side (default left)
@@ -643,6 +667,22 @@ class BmsonParser:
                     'stop': float(stop_val)
                 })
 
+        # Add SCROLL events
+        for scroll_ev in data.get('scroll_events', []):
+            y = scroll_ev.get('y', 0)
+            rate_val = scroll_ev.get('rate', 1.0)
+            try:
+                rate_val = float(rate_val)
+            except (ValueError, TypeError):
+                rate_val = 1.0
+            rate_val = max(0.0, rate_val)
+            events.append({
+                'beat': y / resolution,
+                'time': 0.0,
+                'channel': 'SC',
+                'scroll': rate_val
+            })
+
         # Add visual measure lines at the start of each measure (every 4 beats)
         max_beat = 0.0
         if events:
@@ -659,7 +699,7 @@ class BmsonParser:
         # Sort events by beat and priority
         def get_event_priority(ev):
             ch = ev.get('channel', 'XX')
-            if ch in ("03", "08"): return 0  # BPM change first
+            if ch in ("03", "08") or ch == "SC": return 0  # BPM / SCROLL change first
             if ch == "measure_line": return 1.5
             if ch == "09": return 3          # STOP last
             return 2                         # Notes / Sound channels
@@ -728,18 +768,22 @@ class BmsonParser:
         # Construct BpmTimeline
         bpm_timeline_events = []
         stop_timeline_events = []
+        scroll_timeline_events = []
         for ev in events:
             if 'bpm' in ev:
                 bpm_timeline_events.append((ev['beat'], ev['bpm']))
             if 'stop' in ev:
                 stop_timeline_events.append((ev['beat'], ev['stop']))
+            if 'scroll' in ev:
+                scroll_timeline_events.append((ev['beat'], ev['scroll']))
 
         measures_multiplier = [1.0] * (int(max_beat / 4.0) + 100)
         timeline = BpmTimeline(
             initial_bpm=song_info['bpm'],
             bpm_events=bpm_timeline_events,
             stop_events=stop_timeline_events,
-            measures_multiplier=measures_multiplier
+            measures_multiplier=measures_multiplier,
+            scroll_events=scroll_timeline_events
         )
 
         # Channel to lane mapping
