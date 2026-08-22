@@ -34,16 +34,15 @@ def load_initial_settings(player):
     opt_scratch_side = load_scratch_side()
 
     # Determine lane mapping based on mode and scratch side
-    if player.chart and player.chart.get('mode', 'SP') == 'SP' and opt_scratch_side == "right":
-        channel_to_lane = CHANNEL_TO_LANE_RIGHT.copy()
-        lane_chars = LANE_CHARS_RIGHT.copy()
-    else:
-        channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
-        lane_chars = LANE_CHARS_LEFT.copy()
+    from constants import get_channel_to_lane_map, get_lane_chars
+    mode = player.chart.get('mode', '7K').upper() if player.chart else '7K'
+
+    channel_to_lane = get_channel_to_lane_map(mode, opt_scratch_side)
+    lane_chars = get_lane_chars(mode, opt_scratch_side)
 
     # Sync player mapping
-    is_dp = (player.chart.get('mode', 'SP') == 'DP') if player.chart else False
-    KEY_TO_LANE = load_key_config(opt_scratch_side, is_dp=is_dp)
+    is_dp = (mode in ('10K', '14K'))
+    KEY_TO_LANE = load_key_config(opt_scratch_side, is_dp=is_dp, mode=mode)
     quit_key_code = load_quit_key()
     judgement_y_config, judgement_offset_ms_config = load_judgement_config()
 

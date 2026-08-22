@@ -11,55 +11,7 @@ except ImportError:
     _USE_NUMPY = False
 
 from config import load_audio_config, get_filename_variants, normalize_filename_chars
-
-def resolve_audio_path(base_path: str, relative_file_name: str) -> str | None:
-    """
-    指定されたベースパスと相対ファイル名から実際の音源ファイルパスを解決する。
-    - パス区切り (\\) を / に統一
-    - 特殊文字（波ダッシュ、ダッシュ、マイナス記号等）の表記揺れバリエーション検索
-    - 拡張子フォールバック順 (.wav -> .ogg -> .flac -> .mp3 -> 元の拡張子)
-    - ディレクトリ内スキャンによる文字正規化・大文字小文字無視曖昧一致
-    """
-    rel_path = relative_file_name.replace('\\', '/')
-    full_target = os.path.join(base_path, rel_path)
-
-    dir_name, base_name = os.path.split(full_target)
-    stem, ext = os.path.splitext(base_name)
-
-    # 試行する拡張子の優先順位 (.wav -> .ogg -> .flac -> .mp3 -> 元の拡張子)
-    candidate_exts = ['.wav', '.ogg', '.flac', '.mp3']
-    if ext and ext.lower() not in candidate_exts:
-        candidate_exts.append(ext.lower())
-
-    # 1. 互換文字バリエーション (波ダッシュ、ダッシュ、マイナス記号等)
-    stem_variants = get_filename_variants(stem)
-
-    # 1-A. 直接存在判定
-    for e in candidate_exts:
-        ext_patterns = [e, e.upper()] if e.islower() else [e, e.lower()]
-        for st in stem_variants:
-            for ep in ext_patterns:
-                cand_path = os.path.join(dir_name, st + ep)
-                if os.path.exists(cand_path):
-                    return cand_path
-
-    # 2. ディレクトリ内スキャンによるフォールバック
-    if os.path.isdir(dir_name):
-        try:
-            files_in_dir = os.listdir(dir_name)
-        except OSError:
-            files_in_dir = []
-
-        norm_target_stem = normalize_filename_chars(stem).lower()
-        norm_candidate_exts = [e.lower() for e in candidate_exts]
-
-        for target_ext in norm_candidate_exts:
-            for real_fname in files_in_dir:
-                real_stem, real_ext = os.path.splitext(real_fname)
-                if normalize_filename_chars(real_stem).lower() == norm_target_stem and real_ext.lower() == target_ext:
-                    return os.path.join(dir_name, real_fname)
-
-    return None
+from audio.resolve_audio_path import resolve_audio_path
 
 class AudioEngine:
     def __init__(self):

@@ -4,8 +4,9 @@ import re
 
 from typing import Dict, List, Tuple, Any
 #import logging
-from constants import CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT
+from constants import CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT, get_channel_to_lane_map
 from timing import BpmTimeline, stop_seconds, estimated_total
+from player.mine import is_mine_channel, decode_mine_damage, decode_mine_damage_numeric
 
 from config import load_bms_encoding
 
@@ -17,6 +18,134 @@ class BmsParser:
     def __init__(self):
         self.header_re = re.compile(r"^#(\w+)\s+(.+)")
         self.data_re = re.compile(r"^#(\d{3})([0-9a-zA-Z]{2}):(.+)")
+        # 制御フロー命令を識別する正規表現
+        self._re_random   = re.compile(r"^#(?:RANDOM|RONDAM)\s+(\d+)", re.IGNORECASE)
+        self._re_if       = re.compile(r"^#IF\s+(\d+)", re.IGNORECASE)
+        self._re_elseif   = re.compile(r"^#ELSEIF\s+(\d+)", re.IGNORECASE)
+        self._re_else     = re.compile(r"^#ELSE\b", re.IGNORECASE)
+        self._re_endif    = re.compile(r"^#(?:ENDIF|END)\b", re.IGNORECASE)
+        self._re_endrandom= re.compile(r"^#ENDRANDOM\b", re.IGNORECASE)
+
+    # ------------------------------------------------------------------
+    # #RANDOM / #IF 系プリプロセッサ
+    # ------------------------------------------------------------------
+    def _preprocess_random(self, lines: list) -> list:
+        """#RANDOM / #IF 制御フローを処理し、有効な行のみを返す。
+
+        スタックを使ってネストに対応する。各 #RANDOM ブロックは:
+          rand_val  : 生成された乱数
+          if_state  : 現在の #IF ブロックの状態
+                      'search'  … まだ一致ブロックを探している
+                      'active'  … 一致して現在実行中
+                      'done'    … すでに一致済み（#ELSEIF/#ELSE をスキップ）
+                      'outer_skip' … 外側のブロックが非アクティブなので丸ごとスキップ
+          in_if     : #IF〜#ENDIF ブロックの中にいるか
+        """
+        import random as _random
+
+        # スタックの各要素: {'rand_val': int, 'if_state': str, 'in_if': bool}
+        # トップレベルは「常に active」を表す番兵エントリ
+        stack = [{'rand_val': None, 'if_state': 'active', 'in_if': False}]
+
+        result = []
+
+        def _is_active():
+            """現在の行を出力すべきか。スタック全段が active なら True。"""
+            for frame in stack:
+                state = frame['if_state']
+                if state in ('search', 'done', 'outer_skip'):
+                    return False
+            return True
+
+        for line in lines:
+            stripped = line.strip()
+            upper = stripped.upper()
+
+            # --- #RANDOM / #RONDAM ---
+            m = self._re_random.match(stripped)
+            if m:
+                n = max(1, int(m.group(1)))
+                rand_val = _random.randint(1, n)
+                # 外側が非アクティブなら丸ごとスキップ状態でネスト
+                outer_active = _is_active()
+                state = 'search' if outer_active else 'outer_skip'
+                stack.append({'rand_val': rand_val, 'if_state': state, 'in_if': False})
+                # 制御命令自体は出力しない
+                continue
+
+            # --- #ENDRANDOM ---
+            if self._re_endrandom.match(stripped):
+                if len(stack) > 1:  # 番兵は残す<-番兵って何？
+                    stack.pop()
+                continue
+
+            # --- #IF ---
+            m = self._re_if.match(stripped)
+            if m:
+                n = int(m.group(1))
+                frame = stack[-1]
+                frame['in_if'] = True
+                if frame['if_state'] == 'search':
+                    if frame['rand_val'] == n:
+                        frame['if_state'] = 'active'
+                    # else: 引き続き search（次の #IF / #ELSEIF を待つ）
+                elif frame['if_state'] == 'active':
+                    # すでに一致済みの別 #IF ブロック → done に遷移
+                    frame['if_state'] = 'done'
+                # outer_skip / done のときは何もしない
+                continue
+
+            # --- #ELSEIF ---
+            m = self._re_elseif.match(stripped)
+            if m:
+                n = int(m.group(1))
+                frame = stack[-1]
+                if frame['if_state'] == 'active':
+                    # 現在 active なブロックが終わり → done に
+                    frame['if_state'] = 'done'
+                elif frame['if_state'] == 'search':
+                    if frame['rand_val'] == n:
+                        frame['if_state'] = 'active'
+                # done / outer_skip のときは何もしない
+                continue
+
+            # --- #ELSE ---
+            if self._re_else.match(stripped):
+                frame = stack[-1]
+                if frame['if_state'] == 'active':
+                    frame['if_state'] = 'done'
+                elif frame['if_state'] == 'search':
+                    frame['if_state'] = 'active'
+                # done / outer_skip のときは何もしない
+                continue
+
+            # --- #ENDIF / #END ---
+            if self._re_endif.match(stripped):
+                frame = stack[-1]
+                # #RANDOM ブロック内で #IF が見つかっていたら search 状態に戻す
+                if frame['if_state'] != 'outer_skip':
+                    frame['if_state'] = 'search'
+                frame['in_if'] = False
+                continue
+
+            # --- 空行・コメント行のスキップ ---
+            if not stripped or stripped.startswith('//'):
+                if _is_active():
+                    result.append(line)
+                continue
+
+            # --- 通常命令行 ---
+            # #ENDRANDOM 省略対応:
+            # #IF〜#ENDIF の外側(in_if == False)で、次の #IF / #ELSE / #ELSEIF / #ENDIF 等ではなく
+            # 通常のデータ行/ヘッダー行が来た場合、#ENDRANDOM が省略されたとみなして pop する。
+            while len(stack) > 1 and not stack[-1]['in_if'] and \
+                    stack[-1]['if_state'] in ('search', 'done', 'outer_skip'):
+                stack.pop()
+
+            if _is_active():
+                result.append(line)
+
+        return result
 
     def _parse_header(self, line: str, info: dict, wav_table: dict, base: int) -> None:
         """Parse a header line and update info or wav_table.
@@ -165,23 +294,27 @@ class BmsParser:
             return raw_id.upper()
 
         # BMSは一般的にShift-JISまたはCP932が多い
+        # #RANDOM / #IF 制御フローをプリプロセスして有効行のみに絞り込む
         with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
-            for line in f:
-                line = line.strip()
-                if not line.startswith('#'): continue
+            all_lines = f.readlines()
+        preprocessed_lines = self._preprocess_random(all_lines)
 
-                # Determine if line is a header or data and delegate parsing
-                header_match = self.header_re.match(line)
-                if header_match:
-                    # Use helper to parse header line
-                    self._parse_header(line, info, wav_table, base)
-                    continue
-                # If not a header, try parsing as data line
-                data_match = self.data_re.match(line)
-                if data_match:
-                    # Use helper to parse data line
-                    self._parse_data(line, measures_multiplier, raw_data)
-                # otherwise ignore line
+        for line in preprocessed_lines:
+            line = line.strip()
+            if not line.startswith('#'): continue
+
+            # Determine if line is a header or data and delegate parsing
+            header_match = self.header_re.match(line)
+            if header_match:
+                # Use helper to parse header line
+                self._parse_header(line, info, wav_table, base)
+                continue
+            # If not a header, try parsing as data line
+            data_match = self.data_re.match(line)
+            if data_match:
+                # Use helper to parse data line
+                self._parse_data(line, measures_multiplier, raw_data)
+            # otherwise ignore line
 
         current_beat = 0.0
         measure_beats = [0.0] * 1000
@@ -250,6 +383,14 @@ class BmsParser:
                     event_data['bpm'] = bpm_val
                 if stop_val is not None:
                     event_data['stop'] = stop_val
+
+                # 地雷チャンネル (D1-D9, E1-E9) の場合は is_mine フラグと mine_damage を付与
+                # obj はダメージ値 (base-36) であり、WAVテーブルキーではないため sound_id を None にする
+                if is_mine_channel(channel):
+                    event_data['is_mine'] = True
+                    event_data['mine_damage'] = decode_mine_damage(obj)
+                    event_data['sound_id'] = None
+
                 events.append(event_data)
 
         # Process LNTYPE 2 channels separately
@@ -380,6 +521,32 @@ class BmsParser:
             if ch == "09": return 3          # STOP last (after note channels at 2)
             return 2                         # Notes / Sound channels last
 
+        # 01ch の重複除去
+        # 除去条件①: 11-69ch に同一 (beat, sound_id) があれば 01ch を除去
+        # 除去条件②: 01ch 同士で同一 (beat, sound_id) が重複すれば後発を除去
+        # TODO: BmsonParser にも同一ブロックが存在するため、後でヘルパー関数に切り出してリファクタリングすること
+        _playable_ch = {
+            "11","12","13","14","15","16","17","18","19",
+            "21","22","23","24","25","26","27","28","29",
+            "51","52","53","54","55","56","57","58","59",
+            "61","62","63","64","65","66","67","68","69"
+        }
+        _playable_keys = {
+            (ev['beat'], ev['sound_id'])
+            for ev in events
+            if ev.get('channel') in _playable_ch and ev.get('sound_id') is not None
+        }
+        _seen_01: set = set()
+        _filtered: list = []
+        for ev in events:
+            if ev.get('channel') == '01':
+                key = (ev['beat'], ev.get('sound_id'))
+                if key in _playable_keys or key in _seen_01:
+                    continue
+                _seen_01.add(key)
+            _filtered.append(ev)
+        events = _filtered
+
         events.sort(key=lambda x: (x['beat'], get_event_priority(x)))
         
         # 時系列順（beat順）にBPM変化とSTOPコマンドを適用しながら累積経過時間を計算する。
@@ -473,26 +640,25 @@ class BmsParser:
             scroll_events=scroll_timeline_events
         )
 
-        # Generate default channel_to_lane mapping based on mode and scratch side (default left)
-        mode = info.get('mode', 'SP')
-        # Choose mapping based on mode and default scratch side (left for SP)
-        if mode == 'DP':
-            # DP uses left mapping for both players (as in main)
-            channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
-        else:
-            # SP default to left side mapping
-            channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
-        
-        # Add long note channels mapping dynamically
-        ln_mapping = {}
-        for ch, lane in channel_to_lane.items():
-            if ch.startswith('1'):
-                ln_mapping['5' + ch[1:]] = lane
-            elif ch.startswith('2'):
-                ln_mapping['6' + ch[1:]] = lane
-        channel_to_lane.update(ln_mapping)
+        # 全ノーツチャンネルの集計によるキーモード自動決定
+        used_channels = {ch for _, ch, _ in raw_data}
+        has_1P_7k = bool(used_channels & {"18", "19", "58", "59", "D8", "D9"})
+        has_2P_any = bool(used_channels & {
+            "21", "22", "23", "24", "25", "26", "27", "28", "29",
+            "61", "62", "63", "64", "65", "66", "67", "68", "69",
+            "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9"
+        })
+        has_2P_7k = bool(used_channels & {"28", "29", "68", "69", "E8", "E9"})
 
-        # Attach to chart result
+        if has_2P_any:
+            detected_mode = '14K' if (has_1P_7k or has_2P_7k) else '10K'
+        else:
+            detected_mode = '7K' if has_1P_7k else '5K'
+
+        info['mode'] = detected_mode
+        info['player_mode'] = 'DP' if detected_mode in ('10K', '14K') else 'SP'
+
+        channel_to_lane = get_channel_to_lane_map(detected_mode, 'left')
         chart_channel_to_lane = channel_to_lane
 
         return {
@@ -523,16 +689,27 @@ class BmsonParser:
         if not isinstance(resolution, (int, float)) or resolution <= 0:
             resolution = 480
 
-        # Determine mode: if any note uses x >= 9, it's DP, else SP
-        is_dp = False
+        # Determine mode by aggregating all used x-coordinates across sound_channels and mine_channels
+        used_x = set()
         for channel in data.get('sound_channels', []):
             for note in channel.get('notes', []):
                 x = note.get('x')
-                if x is not None and 9 <= x <= 16:
-                    is_dp = True
-                    break
-            if is_dp:
-                break
+                if x is not None:
+                    used_x.add(x)
+        for mine_ch in data.get('mine_channels', []):
+            for note in mine_ch.get('notes', []):
+                x = note.get('x')
+                if x is not None:
+                    used_x.add(x)
+
+        has_1P_7k = bool(used_x & {6, 7})
+        has_2P_any = bool(used_x & set(range(9, 17)))
+        has_2P_7k = bool(used_x & {14, 15})
+
+        if has_2P_any:
+            detected_mode = '14K' if (has_1P_7k or has_2P_7k) else '10K'
+        else:
+            detected_mode = '7K' if has_1P_7k else '5K'
 
         song_info = {
             'title': info_data.get('title', 'Unknown'),
@@ -545,7 +722,8 @@ class BmsonParser:
             'lnobj': None,
             'lntype': 1,
             'lnmode': info_data.get('lnmode', 1),
-            'mode': 'DP' if is_dp else 'SP'
+            'mode': detected_mode,
+            'player_mode': 'DP' if detected_mode in ('10K', '14K') else 'SP'
         }
 
         # Handle rank conversion if bmson judge_rank is specified in standard 100/etc scale
@@ -641,6 +819,35 @@ class BmsonParser:
                         'channel': '01'
                     })
 
+        # mine_channels の抽出 (bmson 独自拡張: beatoraja 等で対応)
+        mine_channels_data = data.get('mine_channels', [])
+        for mine_ch in mine_channels_data:
+            name = mine_ch.get('name', '')
+            # 爆発音ファイルがあれば wav_table に登録する
+            explosion_sound = None
+            if name:
+                name_norm = name.replace('\\', '/')
+                wav_table[name_norm] = name_norm
+                explosion_sound = name_norm
+
+            notes = mine_ch.get('notes', [])
+            for note in notes:
+                y = note.get('y', 0)
+                x = note.get('x', 0)
+                damage = note.get('damage', 0)
+                beat = y / resolution
+
+                if x in X_TO_CHANNEL_NORMAL:
+                    ch = X_TO_CHANNEL_NORMAL[x]  # 通常チャンネルでレーンを引く
+                    events.append({
+                        'beat': beat,
+                        'time': 0.0,
+                        'sound_id': explosion_sound,  # 爆発音 (None でも可)
+                        'channel': ch,
+                        'is_mine': True,
+                        'mine_damage': decode_mine_damage_numeric(damage),
+                    })
+
         # Add BPM changes
         for bpm_ev in data.get('bpm_events', []):
             y = bpm_ev.get('y', 0)
@@ -703,6 +910,32 @@ class BmsonParser:
             if ch == "measure_line": return 1.5
             if ch == "09": return 3          # STOP last
             return 2                         # Notes / Sound channels
+
+        # 01ch の重複除去
+        # 除去条件①: 11-69ch に同一 (beat, sound_id) があれば 01ch を除去
+        # 除去条件②: 01ch 同士で同一 (beat, sound_id) が重複すれば後発を除去
+        # TODO: BmsParser にも同一ブロックが存在するため、後でヘルパー関数に切り出してリファクタリングすること
+        _playable_ch = {
+            "11","12","13","14","15","16","17","18","19",
+            "21","22","23","24","25","26","27","28","29",
+            "51","52","53","54","55","56","57","58","59",
+            "61","62","63","64","65","66","67","68","69"
+        }
+        _playable_keys = {
+            (ev['beat'], ev['sound_id'])
+            for ev in events
+            if ev.get('channel') in _playable_ch and ev.get('sound_id') is not None
+        }
+        _seen_01: set = set()
+        _filtered: list = []
+        for ev in events:
+            if ev.get('channel') == '01':
+                key = (ev['beat'], ev.get('sound_id'))
+                if key in _playable_keys or key in _seen_01:
+                    continue
+                _seen_01.add(key)
+            _filtered.append(ev)
+        events = _filtered
 
         events.sort(key=lambda x: (x['beat'], get_event_priority(x)))
 
@@ -787,14 +1020,7 @@ class BmsonParser:
         )
 
         # Channel to lane mapping
-        channel_to_lane = CHANNEL_TO_LANE_LEFT.copy()
-        ln_mapping = {}
-        for ch, lane in channel_to_lane.items():
-            if ch.startswith('1'):
-                ln_mapping['5' + ch[1:]] = lane
-            elif ch.startswith('2'):
-                ln_mapping['6' + ch[1:]] = lane
-        channel_to_lane.update(ln_mapping)
+        channel_to_lane = get_channel_to_lane_map(song_info['mode'], 'left')
 
         return {
             'info': song_info,

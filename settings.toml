@@ -1,4 +1,4 @@
-# settings.toml – configuration for Shinonome Mini ver1.59+
+# settings.toml – configuration for Shinonome Mini ver1.61+
 
 [scratch]
 side="left" #"left" or "right"
@@ -31,18 +31,43 @@ scratch_DP_left   = ["a", "A", "\t"]
 # 右スクラッチ（DP時右）
 scratch_DP_right  = ["]", "}", "\n"]
 
+# 5Keys 専用キー設定（未設定の場合は [keys] から自動抽出されます）
+#[keys_5k]
+#scratch = ["a", "A", "\t"]
+#lane0 = ["z", "Z"]
+#lane1 = ["s", "S"]
+#lane2 = ["x", "X"]
+#lane3 = ["d", "D"]
+#lane4 = ["c", "C"]
+
+# 10Keys 専用キー設定（未設定の場合は [keys] から自動抽出されます）
+#[keys_10k]
+#scratch_1p = ["a", "A", "\t"]
+#lane0 = ["z", "Z"]
+#lane1 = ["s", "S"]
+#lane2 = ["x", "X"]
+#lane3 = ["d", "D"]
+#lane4 = ["c", "C"]
+#lane5 = ["j", "J"]
+#lane6 = ["k", "K"]
+#lane7 = ["l", "L"]
+#lane8 = [";", "+"]
+#lane9 = [":", "*"]
+#scratch_2p = ["]", "}", "\n"]
+
 
 # -------------------------------------------------
 # 修飾キー（左シフト / 右シフト など）設定
 # -------------------------------------------------
 # 右スクラッチやo2jam配置等、shiftキーを使用しない場合はuse_pynput = falseにしてください。
-# 数値は内部的なレーン表示順です。（0が一番左、7がSPでの一番右、8がDPでの一番左、15がDPでの一番右）
+# レーン指定は数値（0: 一番左...）のほか、"scratch_1p" や "scratch_2p" というシンボル名指定も可能です。
+# (数値 15 を指定した場合も 10keys プレイ時には自動的に 2P スクラッチレーン (11) へマッピングされます)
 [modifiers]
 use_pynput = true
-# 例：左シフト → レーン 0（SP/DPの左スクラッチ側に割り当てたレーン）
-shift_l = 0
-# 例：右シフト → レーン 15（DPの右スクラッチ側に割り当てたレーン）
-shift_r = 15
+# 例：左シフト → 1P スクラッチ ("scratch_1p" または レーン 0)
+shift_l = "scratch_1p"
+# 例：右シフト → 2P スクラッチ ("scratch_2p" または レーン 15)
+shift_r = "scratch_2p"
 # 必要に応じて他の修飾キーも設定可能
 #ctrl_l  = 1
 #ctrl_r  = x

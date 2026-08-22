@@ -6,7 +6,7 @@ Python で実装された、ターミナル上で動作するシンプルな BMS
 
 ## 主な機能
 - **bms / bmson対応**
-- **SP(7keys), DP(14keys)対応**
+- **SP(5,7keys), DP(10,14keys)対応**
 - **AUTO PLAY / MIRROR / RANDOM / EASY / HARD** オプションを UI で切替
 - `settings.toml` にキー割り当て・設定を外部化
 - オフライン、ファイル出力なし
@@ -40,10 +40,63 @@ python3 main.py path/to/your_chart.bms
 - **Esc** キーで終了します。（設定で変更可）
 - 表示がおかしかったらterminalをfullscreenにしたりフォントサイズを小さくして調整してください。
 
+## メニュー画面例
+- 各キーでオプションを切り替え、Enterで開始します。
+```
+Shinonome-Mini -- Minimal Console BMS Player
+  Song: ^☆^ さくらなみこのかぜ ^☆^ / Artist: #ねここ14歳(obj:futher)
+  Audio ready.
+
+  === PLAY OPTIONS ===
+    [A] AUTO PLAY    : ON
+    [S] AUTO SCRATCH : OFF
+    [M] MIRROR       : OFF
+    [R] RANDOM       : OFF
+    [E] EASY         : OFF
+    [H] HARD GAUGE   : OFF
+    [O] SHOW MEASURES: ON
+    [keyup/down] HS (Hispeed) : 1.2
+    [L] SCRATCH SIDE : LEFT
+    [$] SOLID GAUGE  : OFF
+
+  Press key [A/S/M/R/E/H/O/L/$] to toggle option.
+
+  Press [Enter] to START PLAY
+  Press [esc] to Quit
+```
+
+## ゲーム画面例
+- 白鍵は[]、黒鍵は::、スクラッチはXX、ロングノートは | 、地雷は M! で表示されます。
+```
+  Shinonome-Mini -- Minimal Console BMS Player
+  Song: ^☆^ さくらなみこのかぜ ^☆^ / Artist: #ねここ14歳(obj:futher)
+  BPM: 931.0 | Time: 123.80s | HS: 100.0
+
+    |    |[]  |    |[]  |    |[]  |    |[]  | HARD SOLID: [============----|----]  60.0%
+    |    |    |    |    |    |    |    |    |
+    |    |    |::  |    |::  |    |::  |    | EX SCORE:     0 /  3240
+    |    |[]  |    |[]  |    |[]  |    |[]  | COMBO   :     0  (MAX:     0)
+    |    |    |    |    |    |    |    |    |
+    |    |    |::  |    |::  |    |::  |    | P:   0 G:   0 g:   0 B:   0 M:   0
+    |    |[]  |    |[]  |    |[]  |    |[]  |
+    |    |    |    |    |    |    |    |    |
+    |    |    |::  |    |::  |    |::  |    |
+    |    |[]  |    |[]  |    |[]  |    |[]  |
+    |    |    |    |    |    |    |    |    |
+    |    |    |::  |    |::  |    |::  |    |
+    |    |[]  |    |[]  |    |[]  |    |[]  |
+    |    |    |    |    |::  |    |::  |    |
+    |    |[]  |    |[]  |    |[]  |    |[]  |
+    |    |    |    |    |    |    |    |    |
+  * +----+----+FL--+----+----+----+FL--+----+
+  /  [S]  [1]  [2]  [3]  [4]  [5]  [6]  [7]
+    [       AUTOPLAY MODE ACTIVE       ]
+
+    Press esc to quit playing
+```
 ## Notes & Caveats
 - UIはterminalだけです。グラフィカルUIはありません。
 - 一部の BMS コマンドのみ対応。BMP, BGA 等はスキップします。
-- **SCROLL** コマンドは未対応です。今後実装予定です。
 - **pynput** で **Shift / Ctrl / Alt** キーの判定に対応しています。
 - Wayland 環境では `onrelease` が利用できないため、ロングノートの離した時の判定は未実装（consoleで行う限り実装不可）です。
 
@@ -61,6 +114,7 @@ python3 main.py path/to/your_chart.bms
 - **play_options** – オートプレイ、ミラー、ランダム、イージー、ハードなどの切り替えを行います。
 - **judgement** – 判定ラインの位置やタイミングオフセットを調整します。
 - 音がブツブツ切れるときは、audioセクションでサンプリングレートを下げ、モノラルに設定してください。
+   - numpyがインストールされているかもチェックしてください。
 - デフォルトの文字コードにはshift-jis(cp932), euc-kr(cp949), utf-8を設定できます。
 
 ## ライセンス
@@ -70,26 +124,18 @@ python3 main.py path/to/your_chart.bms
 - こちらのプロジェクト [shinonome](https://github.com/kuroclef/shinonome) の作者様に感謝を申し上げます。
 - 全く別物になっていますが、基本コンセプトをお借りしているので‑miniとさせていただきました。
 
-## いままでやった & あとでやる
-- 基本的なbms再生(BPM変更、小節長変更、STOP、ロングノート、etc) -> ver1.50
-- SCROLL命令 ->1.59e++ ok?
-- 多重再生の改善（do not playback many-time with single #WAVxx definition）
-   - bmsonではpolyphonyに該当する仕様 ->1.53a ok
-- BASE命令（36,62） ->1.53a ok
-- flac対応 ->1.56 ok?
-- pynput use or nouse flag by setting　->1.53b ok
-- 画面表示オプション（none(画面なし)、tiny(ノーツのみ、表示幅・高さも縮小)、mini（通常））、コマンドラインオプション
-- bmsのデフォルトエンコーディング指定(shift-jis, euc-kr, utf-8) ->1.58 ok
-- numpy(cpu負荷軽減) ->1.57c ok
+## あとでやる(ver2.50まで)
+- 9,4,6keys
+- 画面表示オプション（none(画面なし)、tiny(ノーツのみ、表示幅・高さも縮小)、mini（通常））
+- 起動時コマンドラインオプション
+- -> ver2.50以降、プレイリスト(sqlite、別プログラム)へ
 
 ## minimalに保つためやらない
 - 画像・動画表示
-- hidden/sudden, S-RAN/H-RAN/R-RAN, etc
+- hidden/sudden, S-RAN/H-RAN/R-RAN, FLIP(DP), etc
 - スコア記録・保存・送信、ファイル出力
 - IR等オンライン接続
 - プレイリスト -> ※別のプログラムであとでやる
-- #RANDOM〜#IF命令 -> 余裕ができたらやるかも？
-- 地雷ノーツ -> 余裕ができたらやるかも？
 - ZZ（即死）地雷、不可視ノーツ、FREEZONE
 - マイナスBPM、負のSCROLL
    - 負のSCROLL（ノーツの逆流）は譜面によっては動作することを確認しています。
@@ -97,15 +143,31 @@ python3 main.py path/to/your_chart.bms
 - midi対応
 - mp3は再生できますが音ズレがあるのでおすすめしません
 - preview
-- pms, 774, gda形式 ->やるなら5keys/10keysが先, その後9keys, 4k, 6kまで
+- pms, 774, gda, sm, osu等他の形式 ->やるなら5keys/10keysが先, その後9keys, 4k, 6kまで
 - ロングノートは見た目だけです（キーを離した判定ができないため）。そのためLN,CN,HCNの区別もありません。
    - 押しっぱなしにすると次のノートでBADをとられる場合があるので少し早めに離してください。
 - ミュージックボックスを使う（昔の）bms
-- #WAVに絶対パスや親ディレクトリを指定したbms -> サブフォルダ程度なら対応します（あとで。）
+- #WAVに絶対パスや親ディレクトリを指定したbms
+- #STP, #SPEED, #EXT, #SWITCH, etc
 
 ## todoあとで確認
+- wav,bmp等がサブフォルダにわかれているbmsの動作確認
 - ロングノートの複雑な仕様の再確認（lnobj, lnmode, ln_type）
 - bmsonのときbpm確認（1ずれない？）
 - bmsonのとき実質無音ノーツになってる？
 - global変数使うな
 - *.pyが散らばってきたのでディレクトリ分ける
+
+## changelog
+- ver1.50 基本的なbms再生(BPM変更、小節長変更、STOP、ロングノート、etc)
+- 1.53a BASE命令（36,62）
+- 1.53a 多重再生の改善（do not playback many-time with single #WAVxx definition）
+   - bmsonではpolyphonyに該当する仕様
+- 1.53b pynput use or nouse flag by setting
+- 1.56 flac対応
+- 1.57c numpy(cpu負荷軽減)
+- 1.58 bmsのデフォルトエンコーディング指定(shift-jis, euc-kr, utf-8)
+- 1.59e++ #SCROLL命令
+- 1.60 地雷ノーツ
+- 1.60 #RANDOM〜#IF（複数の#RANDOM-#IFが直列している場合にまだ完全に対応できてません）
+- 1.61c 5keys/10keys

@@ -42,27 +42,40 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
     lane_x = 4
     base_speed = 22.0
 
-    is_dp = (player.chart.get('mode', 'SP') == 'DP')
+    mode = player.chart.get('mode', '7K').upper()
+    is_dp = (mode in ('10K', '14K'))
 
-    lane_count = 16 if is_dp else 8
-    if lane_count == 16:
-        LANE_UNIT = "|" + "    |" * 8 + " " + "|" + "    |" * 8
-        JUDGE_UNIT = "+" + "----+" * 8 + " " + "+" + "----+" * 8
+    if mode == '14K':
+        lane_count = 16
+        half = 8
+        LANE_UNIT = "|" + "    |" * half + " " + "|" + "    |" * half
+        JUDGE_UNIT = "+" + "----+" * half + " " + "+" + "----+" * half
         def lane_posx(lane_idx):
-            offset = 2 if lane_idx >= 8 else 0
+            offset = 2 if lane_idx >= half else 0
             return lane_x + 1 + lane_idx * 5 + offset
-    else:
+    elif mode == '10K':
+        lane_count = 12
+        half = 6
+        LANE_UNIT = "|" + "    |" * half + " " + "|" + "    |" * half
+        JUDGE_UNIT = "+" + "----+" * half + " " + "+" + "----+" * half
+        def lane_posx(lane_idx):
+            offset = 2 if lane_idx >= half else 0
+            return lane_x + 1 + lane_idx * 5 + offset
+    elif mode == '5K':
+        lane_count = 6
+        LANE_UNIT = "|" + "    |" * lane_count
+        JUDGE_UNIT = "+" + "----+" * lane_count
+        def lane_posx(lane_idx):
+            return lane_x + 1 + lane_idx * 5
+    else:  # 7K
+        lane_count = 8
         LANE_UNIT = "|" + "    |" * lane_count
         JUDGE_UNIT = "+" + "----+" * lane_count
         def lane_posx(lane_idx):
             return lane_x + 1 + lane_idx * 5
 
-    if is_dp:
-        key_names = KEY_NAMES_DP
-    elif settings['opt_scratch_side'] == "right":
-        key_names = KEY_NAMES_RIGHT
-    else:
-        key_names = KEY_NAMES_LEFT
+    from constants import get_key_names
+    key_names = get_key_names(mode, settings.get('opt_scratch_side', 'left'))
 
     speedup_keycode   = _key_code(settings.get('speedup_key', '+'))
     speeddown_keycode = _key_code(settings.get('speeddown_key', '-'))
@@ -76,7 +89,14 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
         stat_x = lane_x + lane_count * 5 + 2
 
     required_y = 32 if is_dp else 22
-    required_x = 100 if is_dp else 70
+    if mode == '14K':
+        required_x = 100
+    elif mode == '10K':
+        required_x = 80
+    elif mode == '7K':
+        required_x = 70
+    else:  # 5K
+        required_x = 60
 
     def calculate_y(event, player, judgement_y, player_height, scale):
         """イベントの時刻/ビートから描画上のY座標と秒数を計算する"""
@@ -198,6 +218,8 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                     attr = curses.A_DIM
                 elif player.last_judgement == "MISS":
                     attr |= curses.A_BLINK
+                elif player.last_judgement == "MINE":
+                    attr |= curses.A_REVERSE | curses.A_BLINK
                 stdscr.addstr(judgement_y + 6, lane_x + 12, j_str, attr)
                 if player.combo >= 3 and player.last_judgement in ["PERFECT", "GREAT", "GOOD"]:
                     stdscr.addstr(judgement_y + 7, lane_x + 14, f"{player.combo} COMBO", curses.A_BOLD)
@@ -280,11 +302,12 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
                 y, target_seconds = calculate_y(event, player, judgement_y, player_height, scale)
                 if y < 0: break # これ以降のイベントは画面外なので終了
 
-                note_str = lane_chars[lane_idx]
+                note_str = "M!" if event.get('is_mine') else lane_chars[lane_idx]
+                note_attr = curses.A_REVERSE if event.get('is_mine') else curses.A_NORMAL
                 x_pos = lane_posx(lane_idx)
 
                 if start_y <= y < judgement_y:
-                    stdscr.addstr(y, x_pos, note_str)
+                    stdscr.addstr(y, x_pos, note_str, note_attr)
                 elif y >= judgement_y:
                     if current_time - target_seconds < 0.08:
                         stdscr.addstr(judgement_y, x_pos, "FL", curses.A_REVERSE)

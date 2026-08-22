@@ -1,8 +1,10 @@
 import time
 import os
-from audio import AudioEngine
+#from audio import AudioEngine
 from parser import BmsonParser, BmsParser
 import config
+#gauge関係は将来的にすべてgaugeモジュールに移動する
+from player.gauge import _hard_gauge_loss, _solid_gauge_gain_factor, _set_gauge_loss_factor, _reset_gauge, set_gauge_increment
 
 class Player:
     def __init__(self, audio_engine, channel_to_lane):
@@ -32,6 +34,10 @@ class Player:
         self.total_playable_notes = 0
         for event in events:
             channel = event.get('channel', '01')
+            if event.get('is_mine'):
+                event['is_playable'] = False
+                event['state'] = 0
+                continue
             event['is_playable'] = (channel in self.channel_to_lane) or (channel.isdigit() and 51 <= int(channel) <= 69)
             event['state'] = 0  # 0: PENDING, 1: HIT (or BGM processed), 2: MISS
             if event['is_playable']:
@@ -76,25 +82,12 @@ class Player:
         except Exception as e:
             #self._debug_log(f"Error loading chart: {e}")
             raise
-        # Detect DP / SP mode from #PLAYER directive in the BMS file
-        # Default to SP if not found or parsing fails. #PLAYER 1 = SP, others = DP.
-        # For bmson files, respect the mode determined by the parser.
-        if ext == '.bmson':
-            mode = self.chart['info'].get('mode', 'SP')
+        # Retain mode determined by parser (5K, 7K, 10K, 14K)
+        if 'mode' in self.chart['info']:
+            self.chart['mode'] = self.chart['info']['mode']
         else:
-            mode = 'SP'
-            try:
-                with open(file_path, 'r', encoding='shift-jis', errors='ignore') as f:
-                    for line in f:
-                        if line.upper().startswith('#PLAYER'):
-                            parts = line.strip().split()
-                            if len(parts) >= 2 and parts[1].isdigit():
-                                player_num = int(parts[1])
-                                mode = 'SP' if player_num == 1 else 'DP'
-                            break
-            except Exception:
-                pass
-        self.chart['mode'] = mode
+            self.chart['mode'] = '7K'
+        self.chart['is_dp'] = (self.chart['mode'] in ('10K', '14K'))
 
     def load_audio_async(self):
         """チャートのWAVテーブルをバックグラウンドでロード開始する。
@@ -179,53 +172,6 @@ class Player:
             # PERFECT/GREAT時の増加量 (総ノーツを全てPERFECT/GREATで叩いたときにTOTAL%増えるようにする)
             return float(total) / total_playable
 
-    def _hard_gauge_loss(self, is_miss: bool) -> float:
-        """HARDゲージのBAD/MISS時ゲージ減少量を計算する（負の値を返す）。
-        現在のゲージ量 x = gauge/100 に応じた補正関数を使用する。
-          f(x) = 1 - (1-x)^2
-          BAD : -(1 + 4*f(x))
-          MISS: -(2 + 8*f(x))
-        ゲージが高いほど減少量が大きく、低いほど減少量が小さい。
-        """
-        x = self.gauge / 100.0
-        fx = 1.0 - (1.0 - x) ** 2
-        if is_miss:
-            return -(2.0 + 8.0 * fx)
-        else:
-            return -(1.0 + 4.0 * fx)
-
-    def _set_gauge_loss_factor(self):
-        """通常/easyゲージのBAD/MISS時ゲージ減少量のloss_factorを計算する。
-        イージーモード時はゲージ減少量を1/2にする。
-        solidゲージの場合は1/3にする。(easy併用なら1/6)
-        """
-        x = 1.0
-        if self.easy_mode:
-            x /= 2.0
-        if self.solid_gauge:
-            x /= 3.0
-        self.loss_factor = x
-
-    def _reset_gauge(self):
-        """optionに応じたゲージリセット"""
-        if self.solid_gauge: #solid+hardでも60%始まり
-            self.gauge = 60.0
-        elif self.hard_mode:
-            self.gauge = 100.0
-        else:
-            self.gauge = 22.0
-    
-    def _solid_gauge_gain_factor(self) -> float:
-        """SOLIDゲージのゲージ増加量のgain_factorを計算する。
-        現在のゲージ量 x = gauge/100 に応じた補正関数を使用する。
-          f(x) = (1-x^2)/1.5
-        ゲージが高いほど増加量が小さく、低いほど増加量が大きい。いずれの場合でも通常ゲージよりは小さい。
-        ゲージ増加量（比）：{0%: 2/3, 50%: 1/2, 70%: 1/3, 80%: 1/4, 90%: 1/8, 95%: 1/16, 99%: 1/75}
-        """
-        # SOLIDゲージ: ゲージに応じて回復量を抑制、イージーでもハードでも適用される
-        x = self.gauge / 100.0
-        return (1.0 - x ** 2) / 1.5 
-
     def _get_polyphony_limit(self, sound_id):
         if not self.chart:
             return 1
@@ -281,11 +227,48 @@ class Player:
         # 判定窓の取得
         perf_w, great_w, good_w, bad_w = self.get_judgement_windows()
         # タイミングの調整値を反映 (settings.tomlのタイミングオフセット)
-        # 後で設定ローダーから player.judgement_offset_ms を代入する予定
         offset_seconds = getattr(self, 'judgement_offset_ms', 0) / 1000.0
         adjusted_diff = abs(best_event['time'] + offset_seconds - current_time) if best_event else min_diff
 
-        # 判定窓（BAD以内）ならHIT
+        # まず通常ノーツを優先判定。BAD判定窓内の通常ノーツがない場合のみ地雷ノーツをチェックする。
+        if not (best_event and adjusted_diff <= bad_w):
+            # auto_scratch が有効でスクラッチレーンが叩かれた場合は地雷を無視
+            is_scratch = (lane_index == self.channel_to_lane.get("16") or lane_index == self.channel_to_lane.get("26"))
+            if not (self.auto_scratch and is_scratch):
+                mine_events = []
+                for event in events:
+                    if event.get('state', 0) == 0 and event.get('is_mine'):
+                        ch = event.get('channel')
+                        if ch and self.channel_to_lane.get(ch) == lane_index:
+                            m_diff = abs(event['time'] + offset_seconds - current_time)
+                            if m_diff <= bad_w:
+                                mine_events.append((m_diff, event))
+                if mine_events:
+                    mine_events.sort(key=lambda x: x[0])
+                    target_mine = mine_events[0][1]
+                    target_mine['state'] = 1  # 踏んだ状態にする
+                    
+                    # 爆発音の再生 (sound_id または '#WAV00')
+                    sound_to_play = target_mine.get('sound_id') or '00'
+                    if sound_to_play in self.chart.get('wav_table', {}):
+                        limit = self._get_polyphony_limit(sound_to_play)
+                        self.audio.play(sound_to_play, limit)
+                    
+                    damage = target_mine.get('mine_damage', 0.0)
+                    if self.easy_mode:
+                        damage /= 2.0
+                    if self.solid_gauge and not self.hard_mode: #複雑なので、あとでgauge.pyかmine.pyにコードを移動
+                        damage /= 3.0
+                    
+                    self.gauge = max(0.0, self.gauge - damage)
+                    self.last_judgement = "MINE"
+                    self.judgement_time = current_time
+                    if self.hard_mode and self.gauge <= 0.0:
+                        self.is_dead = True
+                        self.is_playing = False
+                    return
+
+        # 判定窓（BAD以内）ならHIT (通常ノーツ)
         if best_event and adjusted_diff <= bad_w:
             best_event['state'] = 1 # HIT状態にする
             if best_event.get('sound_id'):
@@ -301,7 +284,7 @@ class Player:
                 self.combo += 1
                 inc = self.perf_gauge_inc
                 if self.solid_gauge:
-                    inc *= self._solid_gauge_gain_factor()
+                    inc *= _solid_gauge_gain_factor(self.gauge)
                 self.gauge = min(100.0, self.gauge + inc)
                 is_hit = True
             elif adjusted_diff <= great_w:
@@ -311,7 +294,7 @@ class Player:
                 self.combo += 1
                 inc = self.great_gauge_inc
                 if self.solid_gauge:
-                    inc *= self._solid_gauge_gain_factor()
+                    inc *= _solid_gauge_gain_factor(self.gauge)
                 self.gauge = min(100.0, self.gauge + inc)
                 is_hit = True
             elif adjusted_diff <= good_w:
@@ -320,7 +303,7 @@ class Player:
                 self.combo += 1
                 inc = self.good_gauge_inc
                 if self.solid_gauge:
-                    inc *= self._solid_gauge_gain_factor()
+                    inc *= _solid_gauge_gain_factor(self.gauge)
                 self.gauge = min(100.0, self.gauge + inc)
                 is_hit = True
             else:
@@ -328,7 +311,7 @@ class Player:
                 self.bad_count += 1
                 self.combo = 0
                 if self.hard_mode:
-                    loss = self._hard_gauge_loss(is_miss=False)
+                    loss = _hard_gauge_loss(self.gauge, is_miss=False)
                     self.gauge = max(0.0, self.gauge + loss)
                     if self.gauge <= 0.0:
                         self.is_dead = True
@@ -366,23 +349,8 @@ class Player:
         self.active_lns = {}  # lane_index -> start_event
         self.last_key_press_time = [0.0] * 16
         
-        self._set_gauge_loss_factor()
-        self._reset_gauge()
-
-    def set_gauge_increment(self):
-        # モード別のゲージ増加倍率を決定
-        # solid_gaugeは現在のgauge依存なので別に定義する
-        inc = self.get_gauge_increment()
-        if self.hard_mode:
-            # HARDゲージ: 回復量を抑制
-            self.perf_gauge_inc  = inc * 0.2
-            self.great_gauge_inc = inc * 0.15
-            self.good_gauge_inc  = inc * 0.1
-        else:
-            # easyゲージと通常ゲージ: 通常の回復量
-            self.perf_gauge_inc  = inc
-            self.great_gauge_inc = inc
-            self.good_gauge_inc  = inc * 0.5
+        self.loss_factor = _set_gauge_loss_factor(self.easy_mode, self.solid_gauge)
+        self.gauge = _reset_gauge(self.solid_gauge, self.hard_mode)
 
     def play(self, on_update=None, auto_play=True):
         if not self.chart:
@@ -412,7 +380,8 @@ class Player:
             last_event_time = events[-1]['time'] if events else 0.0
 
         #eventを読み込んでから（playable_notesが判明してから）ゲージ増加量を計算
-        self.set_gauge_increment()
+        inc = self.get_gauge_increment()
+        self.perf_gauge_inc, self.great_gauge_inc, self.good_gauge_inc = set_gauge_increment(inc, self.hard_mode)
 
         while self.is_playing:
             current_time = self.get_current_time()
@@ -466,14 +435,7 @@ class Player:
                         # Determine if this event is a scratch note
                         channel = event.get('channel')
                         lane_idx = self.channel_to_lane.get(channel)
-                        is_dp = (self.chart.get('mode', 'SP') == 'DP')
-                        is_scratch = False
-                        if lane_idx is not None:
-                             if is_dp:
-                                 is_scratch = (lane_idx in (0, 15))
-                             else:
-                                 # In SP mode, only channel "16" is considered scratch
-                                 is_scratch = (channel == "16")
+                        is_scratch = (channel in ("16", "17", "26", "27", "56", "57", "66", "67", "D6", "D7", "E6", "E7"))
 
                         if auto_play or (self.auto_scratch and is_scratch):
                             if event.get('sound_id'):
@@ -504,16 +466,8 @@ class Player:
                     if event['state'] == 0 and event['is_playable']:
                         # オートスクラッチが有効な場合、スクラッチノーツは見逃しMISS判定から除外する
                         if self.auto_scratch:
-                            lane_idx = self.channel_to_lane.get(event['channel'])
-                            is_dp = (self.chart.get('mode', 'SP') == 'DP')
-                            is_scratch = False
-                            if is_dp:
-                                if lane_idx in (0, 15):
-                                    is_scratch = True
-                            else:
-                                scratch_lane = self.channel_to_lane.get("16")
-                                if lane_idx == scratch_lane:
-                                    is_scratch = True
+                            ch = event.get('channel')
+                            is_scratch = (ch in ("16", "17", "26", "27", "56", "57", "66", "67", "D6", "D7", "E6", "E7"))
                             if is_scratch:
                                 continue
 
@@ -524,7 +478,7 @@ class Player:
                             self.miss_count += 1
                             self.combo = 0
                             if self.hard_mode:
-                                loss = self._hard_gauge_loss(is_miss=True)
+                                loss = _hard_gauge_loss(self.gauge, is_miss=True)
                                 self.gauge = max(0.0, self.gauge + loss)
                                 if self.gauge <= 0.0:
                                     self.is_dead = True
@@ -538,6 +492,17 @@ class Player:
                                 end_ev = event.get('ln_partner')
                                 if end_ev and end_ev['state'] == 0:
                                     end_ev['state'] = 2
+
+            # スルーされた地雷ノーツの Expiry 処理 (all_processed がストールするのを防ぐ)
+            perf_w, great_w, good_w, bad_w = self.get_judgement_windows()
+            offset_seconds = getattr(self, 'judgement_offset_ms', 0) / 1000.0
+            for event in events[miss_check_index:]:
+                target_seconds = event['time']
+                if (target_seconds + offset_seconds) - current_time > bad_w:
+                    break
+                if event.get('state', 0) == 0 and event.get('is_mine'):
+                    if current_time - (target_seconds + offset_seconds) > bad_w:
+                        event['state'] = 2  # 無害に期限切れにする
 
             # 終了条件：全イベントが処理され、かつ再生中の音がすべて消えた
             if all_processed and len(self.audio.active_sounds) == 0:

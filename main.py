@@ -4,8 +4,8 @@ import sys
 import os
 import tomllib
 from pathlib import Path
-from audio import AudioEngine
-from player import Player
+from audio.core import AudioEngine
+from player.core import Player
 # Import new helper modules
 from helpers.load_initial_settings import load_initial_settings
 from helpers.prepare_game_start import prepare_game_start
@@ -146,17 +146,17 @@ def main(stdscr):
         stdscr.addstr(0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
 
         if player.chart:
-            #stdscr.addstr(2, 2, f"Song: {player.chart['info']['title']}")
+            chart_mode = player.chart.get('mode', '7K').upper()
+            is_dp_mode = (chart_mode in ('10K', '14K'))
             stdscr.addstr(1, 2, f"Song: {player.chart['info'].get('title', 'Unknown')} / Artist: {player.chart['info'].get('artist', 'Unknown')}")
-
-            is_dp_mode = (player.chart.get('mode', 'SP') == 'DP')
+            stdscr.addstr(2, 2, f"MODE: {chart_mode} ({'DP' if is_dp_mode else 'SP'})")
 
             # ロード状態の表示
             if player.audio.is_loading:
                 loaded, total = player.audio.loading_progress
-                stdscr.addstr(2, 2, f"Loading audio... ({loaded}/{total})")
+                stdscr.addstr(3, 2, f"Loading audio... ({loaded}/{total})")
             else:
-                stdscr.addstr(2, 2, "Audio ready.                          ")
+                stdscr.addstr(3, 2, "Audio ready.                          ")
 
             # プレイオプション設定の表示
             stdscr.addstr(4, 2, "=== PLAY OPTIONS ===")
