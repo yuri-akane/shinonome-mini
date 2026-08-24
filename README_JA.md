@@ -94,6 +94,26 @@ Shinonome-Mini -- Minimal Console BMS Player
 
     Press esc to quit playing
 ```
+## CLI options
+```
+--soundonly #画面なし、曲再生のみ
+--nomenu #settings.tomlの設定でゲーム開始
+--random, -r
+--mirror, -m
+--easy, -e
+--hard, -h
+--auto, -a
+--autoscratch, -s
+--solid
+--mode=4k #ゲームモード強制
+--mode=5k
+--mode=6k
+--mode=7k
+--mode=10k
+--mode=14k
+--mini #デフォルトの画面
+(--tiny #もっと小さい画面 (将来実装用))
+```
 ## Notes & Caveats
 - UIはterminalだけです。グラフィカルUIはありません。
 - 一部の BMS コマンドのみ対応。BMP, BGA 等はスキップします。
@@ -125,17 +145,14 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 全く別物になっていますが、基本コンセプトをお借りしているので‑miniとさせていただきました。
 
 ## あとでやる(ver2.50まで)
-- 9,4,6keys
-- 画面表示オプション（none(画面なし)、tiny(ノーツのみ、表示幅・高さも縮小)、mini（通常））
-- 起動時コマンドラインオプション
-- -> ver2.50以降、プレイリスト(sqlite、別プログラム)へ
+- 画面表示オプション（--tiny: ノーツのみ、表示幅・高さも縮小）
+- プレイリスト(別プログラム)
 
 ## minimalに保つためやらない
 - 画像・動画表示
 - hidden/sudden, S-RAN/H-RAN/R-RAN, FLIP(DP), etc
 - スコア記録・保存・送信、ファイル出力
 - IR等オンライン接続
-- プレイリスト -> ※別のプログラムであとでやる
 - ZZ（即死）地雷、不可視ノーツ、FREEZONE
 - マイナスBPM、負のSCROLL
    - 負のSCROLL（ノーツの逆流）は譜面によっては動作することを確認しています。
@@ -143,12 +160,13 @@ Shinonome-Mini -- Minimal Console BMS Player
 - midi対応
 - mp3は再生できますが音ズレがあるのでおすすめしません
 - preview
-- pms, 774, gda, sm, osu等他の形式 ->やるなら5keys/10keysが先, その後9keys, 4k, 6kまで
+- bmm, 774, n2s, gda, sm, osu等他の形式
 - ロングノートは見た目だけです（キーを離した判定ができないため）。そのためLN,CN,HCNの区別もありません。
    - 押しっぱなしにすると次のノートでBADをとられる場合があるので少し早めに離してください。
 - ミュージックボックスを使う（昔の）bms
 - #WAVに絶対パスや親ディレクトリを指定したbms
 - #STP, #SPEED, #EXT, #SWITCH, etc
+- 18keys, 24keys, 48keys, etc
 
 ## todoあとで確認
 - wav,bmp等がサブフォルダにわかれているbmsの動作確認
@@ -157,6 +175,7 @@ Shinonome-Mini -- Minimal Console BMS Player
 - bmsonのとき実質無音ノーツになってる？
 - global変数使うな
 - *.pyが散らばってきたのでディレクトリ分ける
+- do more tests, do more bms.
 
 ## changelog
 - ver1.50 基本的なbms再生(BPM変更、小節長変更、STOP、ロングノート、etc)
@@ -169,5 +188,8 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.58 bmsのデフォルトエンコーディング指定(shift-jis, euc-kr, utf-8)
 - 1.59e++ #SCROLL命令
 - 1.60 地雷ノーツ
-- 1.60 #RANDOM〜#IF（複数の#RANDOM-#IFが直列している場合にまだ完全に対応できてません）
+- 1.60 #RANDOM〜#IF
 - 1.61c 5keys/10keys
+- 1.62 9keys(pms), #RANDOM手直し
+- 1.63 4keys/6keys
+- 1.64 cli options

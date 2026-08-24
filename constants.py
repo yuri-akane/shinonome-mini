@@ -153,6 +153,30 @@ CHANNEL_TO_LANE_10K = {
     "66": 11, "67": 11,
 }
 
+# 9K レーンマッピング (PMS 9鍵)
+CHANNEL_TO_LANE_9K = {
+    "11": 0, "12": 1, "13": 2, "14": 3, "15": 4,
+    "22": 5, "23": 6, "24": 7, "25": 8,
+    "D1": 0, "D2": 1, "D3": 2, "D4": 3, "D5": 4,
+    "E2": 5, "E3": 6, "E4": 7, "E5": 8,
+    "51": 0, "52": 1, "53": 2, "54": 3, "55": 4,
+    "62": 5, "63": 6, "64": 7, "65": 8,
+}
+
+# 4K レーンマッピング
+CHANNEL_TO_LANE_4K = {
+    "11": 0, "12": 1, "13": 2, "14": 3,
+    "D1": 0, "D2": 1, "D3": 2, "D4": 3,
+    "51": 0, "52": 1, "53": 2, "54": 3,
+}
+
+# 6K レーンマッピング
+CHANNEL_TO_LANE_6K = {
+    "11": 0, "12": 1, "13": 2, "14": 3, "15": 4, "18": 5,
+    "D1": 0, "D2": 1, "D3": 2, "D4": 3, "D5": 4, "D8": 5,
+    "51": 0, "52": 1, "53": 2, "54": 3, "55": 4, "58": 5,
+}
+
 # レーンごとのノーツ表現
 LANE_CHARS_LEFT = {
     0: "XX", 
@@ -177,6 +201,16 @@ LANE_CHARS_10K = {
     0: "XX", 1: "[]", 2: "::", 3: "[]", 4: "::", 5: "[]",
     6: "[]", 7: "::", 8: "[]", 9: "::", 10: "[]", 11: "XX"
 }
+LANE_CHARS_9K = {
+    0: "()", 1: "^^", 2: "&&", 3: ">>", 4: "XX",
+    5: "<<", 6: "&&", 7: "^^", 8: "()"
+}
+LANE_CHARS_4K = {
+    0: "[]", 1: ">>", 2: "<<", 3: "[]"
+}
+LANE_CHARS_6K = {
+    0: "[]", 1: "::", 2: ">>", 3: "<<", 4: "::", 5: "[]"
+}
 
 # キー名表示用のリスト
 KEY_NAMES_DP = [
@@ -196,11 +230,26 @@ KEY_NAMES_10K = [
     "[S1]", "[1]", "[2]", "[3]", "[4]", "[5]",
     "[6]", "[7]", "[8]", "[9]", "[10]", "[S2]"
 ]
+KEY_NAMES_9K = [
+    "[W]", "[Y]", "[G]", "[B]", "[R]", "[B]", "[G]", "[Y]", "[W]"
+]
+KEY_NAMES_4K = [
+    "[1]", "[2]", "[3]", "[4]"
+]
+KEY_NAMES_6K = [
+    "[1]", "[2]", "[3]", "[4]", "[5]", "[6]"
+]
 
 def get_channel_to_lane_map(mode: str, scratch_side: str = "left") -> dict:
     """キーモードとスクラッチ位置に応じた channel_to_lane マップを返す"""
     mode_upper = mode.upper()
-    if mode_upper == "5K":
+    if mode_upper == "4K":
+        return CHANNEL_TO_LANE_4K.copy()
+    elif mode_upper == "6K":
+        return CHANNEL_TO_LANE_6K.copy()
+    elif mode_upper == "9K":
+        return CHANNEL_TO_LANE_9K.copy()
+    elif mode_upper == "5K":
         return CHANNEL_TO_LANE_5K_RIGHT.copy() if scratch_side == "right" else CHANNEL_TO_LANE_5K_LEFT.copy()
     elif mode_upper == "10K":
         return CHANNEL_TO_LANE_10K.copy()
@@ -212,7 +261,13 @@ def get_channel_to_lane_map(mode: str, scratch_side: str = "left") -> dict:
 def get_lane_chars(mode: str, scratch_side: str = "left") -> dict:
     """キーモードとスクラッチ位置に応じた lane_chars を返す"""
     mode_upper = mode.upper()
-    if mode_upper == "5K":
+    if mode_upper == "4K":
+        return LANE_CHARS_4K
+    elif mode_upper == "6K":
+        return LANE_CHARS_6K
+    elif mode_upper == "9K":
+        return LANE_CHARS_9K
+    elif mode_upper == "5K":
         return LANE_CHARS_5K_RIGHT if scratch_side == "right" else LANE_CHARS_5K_LEFT
     elif mode_upper == "10K":
         return LANE_CHARS_10K
@@ -224,7 +279,13 @@ def get_lane_chars(mode: str, scratch_side: str = "left") -> dict:
 def get_key_names(mode: str, scratch_side: str = "left") -> list:
     """キーモードとスクラッチ位置に応じた key_names を返す"""
     mode_upper = mode.upper()
-    if mode_upper == "5K":
+    if mode_upper == "4K":
+        return KEY_NAMES_4K
+    elif mode_upper == "6K":
+        return KEY_NAMES_6K
+    elif mode_upper == "9K":
+        return KEY_NAMES_9K
+    elif mode_upper == "5K":
         return KEY_NAMES_5K_RIGHT if scratch_side == "right" else KEY_NAMES_5K_LEFT
     elif mode_upper == "10K":
         return KEY_NAMES_10K
@@ -232,6 +293,3 @@ def get_key_names(mode: str, scratch_side: str = "left") -> list:
         return KEY_NAMES_RIGHT if scratch_side == "right" else KEY_NAMES_LEFT
     else:  # 14K
         return KEY_NAMES_DP
-
-
-

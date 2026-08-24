@@ -14,7 +14,7 @@ from constants import (
     LANE_CHARS_RIGHT,
 )
 
-def load_initial_settings(player):
+def load_initial_settings(player, args=None):
     """
     Load configuration and initialize player settings.
 
@@ -35,6 +35,13 @@ def load_initial_settings(player):
 
     # Determine lane mapping based on mode and scratch side
     from constants import get_channel_to_lane_map, get_lane_chars
+
+    # ゲームモード強制指定（CLIの --mode / --mode-hint）
+    force_mode = getattr(args, 'force_mode', None) if args else None
+    if force_mode and player.chart:
+        player.chart['mode'] = force_mode
+        player.chart['is_dp'] = (force_mode in ('10K', '14K'))
+
     mode = player.chart.get('mode', '7K').upper() if player.chart else '7K'
 
     channel_to_lane = get_channel_to_lane_map(mode, opt_scratch_side)
@@ -92,6 +99,27 @@ def load_initial_settings(player):
         opt_autoscratch = False
         speedup_code = curses.KEY_UP
         speeddown_code = curses.KEY_DOWN
+
+    # CLIオプションによるオーバーライド（settings.tomlの値を上書き）
+    if args is not None:
+        if getattr(args, 'autoplay', False):
+            opt_autoplay = True
+        if getattr(args, 'mirror', False):
+            opt_mirror = True
+        if getattr(args, 'random', False):
+            opt_random = True
+        if getattr(args, 'easy', False):
+            opt_easy = True
+        if getattr(args, 'hard', False):
+            opt_hard = True
+        if getattr(args, 'solid', False):
+            opt_solid = True
+        if getattr(args, 'autoscratch', False):
+            opt_autoscratch = True
+        # --easy と --hard の排他処理
+        if getattr(args, 'easy', False) and getattr(args, 'hard', False):
+            # 両方指定された場合は hard を優先
+            opt_easy = False
 
     # Sync player mapping after determining channel_to_lane
     player.channel_to_lane = channel_to_lane

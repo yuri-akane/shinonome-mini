@@ -16,7 +16,7 @@ class BmsParser:
     and builds a list of timed events.
     """
     def __init__(self):
-        self.header_re = re.compile(r"^#(\w+)\s+(.+)")
+        self.header_re = re.compile(r"^#(\w+)(?:\s+(.+))?")
         self.data_re = re.compile(r"^#(\d{3})([0-9a-zA-Z]{2}):(.+)")
         # 制御フロー命令を識別する正規表現
         self._re_random   = re.compile(r"^#(?:RANDOM|RONDAM)\s+(\d+)", re.IGNORECASE)
@@ -31,51 +31,58 @@ class BmsParser:
     # ------------------------------------------------------------------
     def _preprocess_random(self, lines: list) -> list:
         """#RANDOM / #IF 制御フローを処理し、有効な行のみを返す。
+        複数の #RANDOM 命令が直列に配置されている場合やネストにも対応。
 
-        スタックを使ってネストに対応する。各 #RANDOM ブロックは:
+        スタックを使ってネスト・直列に対応する。各 #RANDOM ブロックは:
           rand_val  : 生成された乱数
           if_state  : 現在の #IF ブロックの状態
-                      'search'  … まだ一致ブロックを探している
-                      'active'  … 一致して現在実行中
-                      'done'    … すでに一致済み（#ELSEIF/#ELSE をスキップ）
+                      'search'     … まだ一致ブロックを探している
+                      'active'     … 一致して現在実行中
+                      'done'       … すでに一致済み（#ELSEIF/#ELSE をスキップ）
+                      'block_end'  … #ENDIF等で1つのIFブロックが終了した状態
                       'outer_skip' … 外側のブロックが非アクティブなので丸ごとスキップ
           in_if     : #IF〜#ENDIF ブロックの中にいるか
         """
         import random as _random
 
         # スタックの各要素: {'rand_val': int, 'if_state': str, 'in_if': bool}
-        # トップレベルは「常に active」を表す番兵エントリ
+        # トップレベル（index 0）は常に active
         stack = [{'rand_val': None, 'if_state': 'active', 'in_if': False}]
-
         result = []
 
         def _is_active():
-            """現在の行を出力すべきか。スタック全段が active なら True。"""
             for frame in stack:
-                state = frame['if_state']
-                if state in ('search', 'done', 'outer_skip'):
+                if frame['if_state'] in ('search', 'done', 'outer_skip'):
                     return False
             return True
 
         for line in lines:
             stripped = line.strip()
-            upper = stripped.upper()
+
+            # --- 空行・コメント行のスキップ ---
+            if not stripped or stripped.startswith('//'):
+                if _is_active():
+                    result.append(line)
+                continue
 
             # --- #RANDOM / #RONDAM ---
             m = self._re_random.match(stripped)
             if m:
+                # すでに前の #RANDOM ブロックの #IF〜#ENDIF の外側にいるなら
+                # 前の #RANDOM ブロックを終了(pop)させてから新しい #RANDOM を開始する
+                while len(stack) > 1 and not stack[-1]['in_if']:
+                    stack.pop()
+
                 n = max(1, int(m.group(1)))
                 rand_val = _random.randint(1, n)
-                # 外側が非アクティブなら丸ごとスキップ状態でネスト
                 outer_active = _is_active()
                 state = 'search' if outer_active else 'outer_skip'
                 stack.append({'rand_val': rand_val, 'if_state': state, 'in_if': False})
-                # 制御命令自体は出力しない
                 continue
 
             # --- #ENDRANDOM ---
             if self._re_endrandom.match(stripped):
-                if len(stack) > 1:  # 番兵は残す<-番兵って何？
+                if len(stack) > 1:
                     stack.pop()
                 continue
 
@@ -85,14 +92,17 @@ class BmsParser:
                 n = int(m.group(1))
                 frame = stack[-1]
                 frame['in_if'] = True
-                if frame['if_state'] == 'search':
+                if frame['if_state'] in ('search', 'block_end'):
                     if frame['rand_val'] == n:
                         frame['if_state'] = 'active'
-                    # else: 引き続き search（次の #IF / #ELSEIF を待つ）
+                    else:
+                        frame['if_state'] = 'search'
                 elif frame['if_state'] == 'active':
-                    # すでに一致済みの別 #IF ブロック → done に遷移
-                    frame['if_state'] = 'done'
-                # outer_skip / done のときは何もしない
+                    # #ENDIF なしで次の #IF が来た場合
+                    if frame['rand_val'] == n:
+                        frame['if_state'] = 'active'
+                    else:
+                        frame['if_state'] = 'done'
                 continue
 
             # --- #ELSEIF ---
@@ -101,12 +111,10 @@ class BmsParser:
                 n = int(m.group(1))
                 frame = stack[-1]
                 if frame['if_state'] == 'active':
-                    # 現在 active なブロックが終わり → done に
                     frame['if_state'] = 'done'
-                elif frame['if_state'] == 'search':
+                elif frame['if_state'] in ('search', 'block_end'):
                     if frame['rand_val'] == n:
                         frame['if_state'] = 'active'
-                # done / outer_skip のときは何もしない
                 continue
 
             # --- #ELSE ---
@@ -114,32 +122,23 @@ class BmsParser:
                 frame = stack[-1]
                 if frame['if_state'] == 'active':
                     frame['if_state'] = 'done'
-                elif frame['if_state'] == 'search':
+                elif frame['if_state'] in ('search', 'block_end'):
                     frame['if_state'] = 'active'
-                # done / outer_skip のときは何もしない
                 continue
 
             # --- #ENDIF / #END ---
             if self._re_endif.match(stripped):
                 frame = stack[-1]
-                # #RANDOM ブロック内で #IF が見つかっていたら search 状態に戻す
                 if frame['if_state'] != 'outer_skip':
-                    frame['if_state'] = 'search'
+                    # ブロック終了時は 'block_end' に更新 ('search' に戻さない)
+                    frame['if_state'] = 'block_end'
                 frame['in_if'] = False
                 continue
 
-            # --- 空行・コメント行のスキップ ---
-            if not stripped or stripped.startswith('//'):
-                if _is_active():
-                    result.append(line)
-                continue
-
-            # --- 通常命令行 ---
+            # --- 通常のデータ行 / ヘッダー行 ---
             # #ENDRANDOM 省略対応:
-            # #IF〜#ENDIF の外側(in_if == False)で、次の #IF / #ELSE / #ELSEIF / #ENDIF 等ではなく
-            # 通常のデータ行/ヘッダー行が来た場合、#ENDRANDOM が省略されたとみなして pop する。
-            while len(stack) > 1 and not stack[-1]['in_if'] and \
-                    stack[-1]['if_state'] in ('search', 'done', 'outer_skip'):
+            # #IF ブロックの外側で通常データ行が来た場合、現在の #RANDOM を終了(pop)する
+            if len(stack) > 1 and not stack[-1]['in_if'] and stack[-1]['if_state'] == 'block_end':
                 stack.pop()
 
             if _is_active():
@@ -168,6 +167,16 @@ class BmsParser:
 
         if key_upper == "TITLE":
             info['title'] = val
+        elif key_upper == "4K":
+            info['forced_mode'] = '4K'
+        elif key_upper == "6K":
+            info['forced_mode'] = '6K'
+        elif key_upper == "MODE":
+            val_str = (val or '').strip()
+            if val_str == "4":
+                info['forced_mode'] = '4K'
+            elif val_str == "6":
+                info['forced_mode'] = '6K'
         elif key_upper == "ARTIST":
             info['artist'] = val
         elif key_upper == "BPM":
@@ -303,18 +312,17 @@ class BmsParser:
             line = line.strip()
             if not line.startswith('#'): continue
 
-            # Determine if line is a header or data and delegate parsing
-            header_match = self.header_re.match(line)
-            if header_match:
-                # Use helper to parse header line
-                self._parse_header(line, info, wav_table, base)
-                continue
-            # If not a header, try parsing as data line
+            # If it's a data line (#00111:01020304 etc.), parse data line first
             data_match = self.data_re.match(line)
             if data_match:
-                # Use helper to parse data line
                 self._parse_data(line, measures_multiplier, raw_data)
-            # otherwise ignore line
+                continue
+
+            # Otherwise, check if line is a header line (#TITLE, #BPM, #4K, #6K etc.)
+            header_match = self.header_re.match(line)
+            if header_match:
+                self._parse_header(line, info, wav_table, base)
+                continue
 
         current_beat = 0.0
         measure_beats = [0.0] * 1000
@@ -641,16 +649,28 @@ class BmsParser:
         )
 
         # 全ノーツチャンネルの集計によるキーモード自動決定
+        ext_is_pms = file_path.lower().endswith('.pms')
         used_channels = {ch for _, ch, _ in raw_data}
-        has_1P_7k = bool(used_channels & {"18", "19", "58", "59", "D8", "D9"})
-        has_2P_any = bool(used_channels & {
-            "21", "22", "23", "24", "25", "26", "27", "28", "29",
-            "61", "62", "63", "64", "65", "66", "67", "68", "69",
-            "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9"
-        })
-        has_2P_7k = bool(used_channels & {"28", "29", "68", "69", "E8", "E9"})
 
-        if has_2P_any:
+        has_scratch = bool(used_channels & {
+            "16", "17", "26", "27", "56", "57", "66", "67", "D6", "D7", "E6", "E7"
+        })
+        has_1P_7k = bool(used_channels & {"18", "19", "58", "59", "D8", "D9"})
+        has_pms_2p = bool(used_channels & {
+            "22", "23", "24", "25", "62", "63", "64", "65", "E2", "E3", "E4", "E5"
+        })
+        has_non_pms_2p = bool(used_channels & {
+            "21", "26", "27", "28", "29", "61", "66", "67", "68", "69", "E1", "E6", "E7", "E8", "E9"
+        })
+
+        if info.get('forced_mode'):
+            detected_mode = info['forced_mode']
+        elif ext_is_pms:
+            detected_mode = '9K'
+        elif has_pms_2p and not has_scratch and not has_non_pms_2p and not has_1P_7k:
+            detected_mode = '9K'
+        elif (has_pms_2p or has_non_pms_2p):
+            has_2P_7k = bool(used_channels & {"28", "29", "68", "69", "E8", "E9"})
             detected_mode = '14K' if (has_1P_7k or has_2P_7k) else '10K'
         else:
             detected_mode = '7K' if has_1P_7k else '5K'
@@ -689,7 +709,9 @@ class BmsonParser:
         if not isinstance(resolution, (int, float)) or resolution <= 0:
             resolution = 480
 
-        # Determine mode by aggregating all used x-coordinates across sound_channels and mine_channels
+        ext_is_pms = file_path.lower().endswith('.pms')
+        raw_mode_hint = str(info_data.get('mode_hint', '')).lower().strip()
+
         used_x = set()
         for channel in data.get('sound_channels', []):
             for note in channel.get('notes', []):
@@ -702,12 +724,25 @@ class BmsonParser:
                 if x is not None:
                     used_x.add(x)
 
+        has_scratch = bool(used_x & {8, 16})
         has_1P_7k = bool(used_x & {6, 7})
         has_2P_any = bool(used_x & set(range(9, 17)))
         has_2P_7k = bool(used_x & {14, 15})
 
-        if has_2P_any:
+        if raw_mode_hint in ('generic-4k', 'beat-4k', '4k'):
+            detected_mode = '4K'
+        elif raw_mode_hint in ('generic-6k', 'beat-6k', '6k'):
+            detected_mode = '6K'
+        elif ext_is_pms or (raw_mode_hint == 'popn-9k'):
+            detected_mode = '9K'
+        elif (not has_scratch) and (not has_2P_any) and (6 in used_x or 7 in used_x or 8 in used_x or 9 in used_x) and not (has_1P_7k and 8 in used_x):
+            detected_mode = '9K'
+        elif has_2P_any:
             detected_mode = '14K' if (has_1P_7k or has_2P_7k) else '10K'
+        elif not has_scratch and used_x and max(used_x) <= 4:
+            detected_mode = '4K'
+        elif not has_scratch and used_x and max(used_x) <= 6 and not has_1P_7k:
+            detected_mode = '6K'
         else:
             detected_mode = '7K' if has_1P_7k else '5K'
 
@@ -727,9 +762,6 @@ class BmsonParser:
         }
 
         # Handle rank conversion if bmson judge_rank is specified in standard 100/etc scale
-        # Typically bmson judge_rank of 100 is Normal (2) or Easy (3).
-        # We check if rank is >= 5, in which case we map it:
-        # e.g., standard bmson judge_rank: 100 is NORMAL (2).
         if isinstance(song_info['rank'], (int, float)) and song_info['rank'] >= 5:
             jr = song_info['rank']
             if jr >= 120:
@@ -747,15 +779,36 @@ class BmsonParser:
         events = []
 
         # Mapping from bmson x-lane values to BMS channels
-        # x is 1-based index: 1-7 for 1P keys, 8 for 1P scratch, 9-15 for 2P keys, 16 for 2P scratch
-        X_TO_CHANNEL_NORMAL = {
-            1: "11", 2: "12", 3: "13", 4: "14", 5: "15", 6: "18", 7: "19", 8: "16",
-            9: "21", 10: "22", 11: "23", 12: "24", 13: "25", 14: "28", 15: "29", 16: "26"
-        }
-        X_TO_CHANNEL_LN = {
-            1: "51", 2: "52", 3: "53", 4: "54", 5: "55", 6: "58", 7: "59", 8: "56",
-            9: "61", 10: "62", 11: "63", 12: "64", 13: "65", 14: "68", 15: "69", 16: "66"
-        }
+        if detected_mode == '4K':
+            X_TO_CHANNEL_NORMAL = {
+                1: "11", 2: "12", 3: "13", 4: "14"
+            }
+            X_TO_CHANNEL_LN = {
+                1: "51", 2: "52", 3: "53", 4: "54"
+            }
+        elif detected_mode == '6K':
+            X_TO_CHANNEL_NORMAL = {
+                1: "11", 2: "12", 3: "13", 4: "14", 5: "15", 6: "18"
+            }
+            X_TO_CHANNEL_LN = {
+                1: "51", 2: "52", 3: "53", 4: "54", 5: "55", 6: "58"
+            }
+        elif detected_mode == '9K':
+            X_TO_CHANNEL_NORMAL = {
+                1: "11", 2: "12", 3: "13", 4: "14", 5: "15", 6: "22", 7: "23", 8: "24", 9: "25"
+            }
+            X_TO_CHANNEL_LN = {
+                1: "51", 2: "52", 3: "53", 4: "54", 5: "55", 6: "62", 7: "63", 8: "64", 9: "65"
+            }
+        else:
+            X_TO_CHANNEL_NORMAL = {
+                1: "11", 2: "12", 3: "13", 4: "14", 5: "15", 6: "18", 7: "19", 8: "16",
+                9: "21", 10: "22", 11: "23", 12: "24", 13: "25", 14: "28", 15: "29", 16: "26"
+            }
+            X_TO_CHANNEL_LN = {
+                1: "51", 2: "52", 3: "53", 4: "54", 5: "55", 6: "58", 7: "59", 8: "56",
+                9: "61", 10: "62", 11: "63", 12: "64", 13: "65", 14: "68", 15: "69", 16: "66"
+            }
 
         polyphony_table = {}
 

@@ -94,6 +94,26 @@ Shinonome-Mini -- Minimal Console BMS Player
 
     Press esc to quit playing
 ```
+## CLI options
+```
+--soundonly #no display, music only
+--nomenu #game start with default settings(settings.toml)
+--random, -r
+--mirror, -m
+--easy, -e
+--hard, -h
+--auto, -a
+--autoscratch, -s
+--solid
+--mode=4k #force game mode
+--mode=5k
+--mode=6k
+--mode=7k
+--mode=10k
+--mode=14k
+--mini #default display 
+(--tiny #more tiny display (for future deploy))
+```
 ## Notes & Caveats
 - The UI is terminal‑only; no graphical interface.
 - Only a subset of BMS commands are parsed. BMP, BGA and other visual commands are skipped.
@@ -126,28 +146,26 @@ normal gauge.
 - Although this is a completely different project, it borrows the core concept, hence the "-mini" suffix.
 
 ## future support(to ver2.50)
-- 9,4,6keys
-- display (none, tiny, mini) option
-- cmdline option
-- after ver2.50, playlists(sqlite, separate program)
+- display option(--tiny: more tiny size)
+- playlists → (planned for a separate program later)
 
 ## this program doesn't support:
 - movie or image (BMP, BGA)
 - hidden/sudden, S-RAN/H-RAN/R-RAN, FLIP(DP),  etc
 - score/file output
 - IR or network connection
-- playlists → (planned for a separate program later)
 - ZZ mine, invisible notes, FREEZONE
 - minus BPM, minus SCROLL
    - minus SCROLL may be done, but not fully tested
 - midi
 - mp3 may cause delay, same as other player.
 - preview
-- pms, 774, gda, sm, osu and other formats → (if implemented, prioritize 5‑key/10‑key support, then 9‑key, 4‑key, 6‑key)
+- bmm, 774, n2s, gda, sm, osu and other formats
 - Full long‑note support (LN,CN,HCN...sorry i can't...)
 - musicbox (old bms)
 - #WAVxx as absolute path or parent directory
 - #STP, #SPEED, #EXT, #SWITCH, etc
+- 18keys, 24keys, 48keys, etc
 
 ## TODO (to be verified later)
 - Verify bms support that resources (wav, bmp) are divided into subfolders
@@ -156,6 +174,7 @@ normal gauge.
 - Check that bmson charts do not produce silent notes.
 - do not use global variable
 - split modules for refactor
+- do more tests, do more bms.
 
 ## changelog
 - ver1.50 basic bms command to play (bpm change, score length change, stop, longnote or so)
@@ -169,4 +188,7 @@ normal gauge.
 - 1.59e++ #SCROLL
 - 1.60 mine notes
 - 1.60 #RANDOM - #IF
-- 1.61 5keys/10keys
+- 1.61c 5keys/10keys
+- 1.62 9keys(pms), fix #RANDOM
+- 1.63 4keys/6keys
+- 1.64 cli options

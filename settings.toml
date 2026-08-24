@@ -1,4 +1,4 @@
-# settings.toml – configuration for Shinonome Mini ver1.61+
+# settings.toml – configuration for Shinonome Mini ver1.62+
 
 [scratch]
 side="left" #"left" or "right"
@@ -41,20 +41,45 @@ scratch_DP_right  = ["]", "}", "\n"]
 #lane4 = ["c", "C"]
 
 # 10Keys 専用キー設定（未設定の場合は [keys] から自動抽出されます）
-#[keys_10k]
+[keys_10k]
 #scratch_1p = ["a", "A", "\t"]
 #lane0 = ["z", "Z"]
 #lane1 = ["s", "S"]
 #lane2 = ["x", "X"]
 #lane3 = ["d", "D"]
 #lane4 = ["c", "C"]
-#lane5 = ["j", "J"]
-#lane6 = ["k", "K"]
-#lane7 = ["l", "L"]
-#lane8 = [";", "+"]
-#lane9 = [":", "*"]
+lane5 = [".", ">"]
+lane6 = [";", "+"]
+lane7 = ["/", "?"]
+lane8 = [":", "*"]
+lane9 = ["\\", "_"]
 #scratch_2p = ["]", "}", "\n"]
 
+# 9Keys(pms) 専用キー設定（未設定の場合は [keys] から自動抽出されます）
+[keys_9k]
+#lane0 = ["z", "Z"]
+#lane1 = ["s", "S"]
+#lane2 = ["x", "X"]
+#lane3 = ["d", "D"]
+#lane4 = ["c", "C"]
+lane5 = ["f", "F"]
+lane6 = ["v", "V"]
+lane7 = ["g", "G"]
+lane8 = ["b", "B"]
+
+[keys_4k]
+lane0 = ["d", "D"]
+lane1 = ["f", "F"]
+lane2 = ["j", "J"]
+lane3 = ["k", "K"]
+
+[keys_6k]
+lane0 = ["s", "S"]
+lane1 = ["d", "D"]
+lane2 = ["f", "F"]
+lane3 = ["j", "J"]
+lane4 = ["k", "K"]
+lane5 = ["l", "L"]
 
 # -------------------------------------------------
 # 修飾キー（左シフト / 右シフト など）設定

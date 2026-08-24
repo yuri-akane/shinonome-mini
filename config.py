@@ -88,7 +88,33 @@ def load_key_config(scratch_side, is_dp: bool = False, mode: str = None) -> dict
 
     new_map = {}
 
-    if mode_upper == "5K":
+    if mode_upper == "4K":
+        cfg_4k = config_data.get('keys_4k', {}) if config_data else {}
+        keys_cfg = config_data.get('keys', {}) if config_data else {}
+        default_4k_keys = ['d', 'f', 'j', 'k']
+        for i in range(4):
+            lane_val = cfg_4k.get(f'lane{i}')
+            if lane_val is None:
+                lane_val = keys_cfg.get(f'lane{i}')
+            if lane_val is None:
+                lane_val = default_4k_keys[i]
+            add_keys(new_map, lane_val, i)
+        return new_map
+
+    elif mode_upper == "6K":
+        cfg_6k = config_data.get('keys_6k', {}) if config_data else {}
+        keys_cfg = config_data.get('keys', {}) if config_data else {}
+        default_6k_keys = ['s', 'd', 'f', 'j', 'k', 'l']
+        for i in range(6):
+            lane_val = cfg_6k.get(f'lane{i}')
+            if lane_val is None:
+                lane_val = keys_cfg.get(f'lane{i}')
+            if lane_val is None:
+                lane_val = default_6k_keys[i]
+            add_keys(new_map, lane_val, i)
+        return new_map
+
+    elif mode_upper == "5K":
         is_right = (scratch_side == "right")
         scratch_lane = 5 if is_right else 0
         cfg_5k = config_data.get('keys_5k', {}) if config_data else {}
@@ -111,6 +137,24 @@ def load_key_config(scratch_side, is_dp: bool = False, mode: str = None) -> dict
                 return {ord('z'): 0, ord('s'): 1, ord('x'): 2, ord('d'): 3, ord('c'): 4, ord(' '): 5, ord('a'): 5}
             else:
                 return {ord(' '): 0, ord('a'): 0, ord('z'): 1, ord('s'): 2, ord('x'): 3, ord('d'): 4, ord('c'): 5}
+        return new_map
+
+    elif mode_upper == "9K":
+        cfg_9k = config_data.get('keys_9k', {}) if config_data else {}
+        keys_cfg = config_data.get('keys', {}) if config_data else {}
+
+        fallback_lanes = [0, 1, 2, 3, 4, 8, 9, 10, 11]
+        default_9k_keys = ['z', 's', 'x', 'd', 'c', 'f', 'v', 'g', 'b']
+
+        for i in range(9):
+            lane_val = cfg_9k.get(f'lane{i}')
+            if lane_val is None:
+                fb_i = fallback_lanes[i]
+                lane_val = keys_cfg.get(f'lane{fb_i}')
+            if lane_val is None:
+                lane_val = default_9k_keys[i]
+            add_keys(new_map, lane_val, i)
+
         return new_map
 
     elif mode_upper == "10K":
@@ -223,7 +267,13 @@ def load_modifier_keys(mode: str = "7K", scratch_side: str = "left") -> dict:
     """
     mode_upper = mode.upper() if mode else "7K"
 
-    if mode_upper == "5K":
+    if mode_upper in ("4K", "6K"):
+        scratch_1p_lane = 0
+        scratch_2p_lane = 0
+    elif mode_upper == "9K":
+        scratch_1p_lane = 0
+        scratch_2p_lane = 8
+    elif mode_upper == "5K":
         scratch_1p_lane = 5 if scratch_side == "right" else 0
         scratch_2p_lane = 5 if scratch_side == "right" else 0
     elif mode_upper == "10K":

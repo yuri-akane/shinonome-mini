@@ -61,8 +61,26 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
         def lane_posx(lane_idx):
             offset = 2 if lane_idx >= half else 0
             return lane_x + 1 + lane_idx * 5 + offset
+    elif mode == '9K':
+        lane_count = 9
+        LANE_UNIT = "|" + "    |" * lane_count
+        JUDGE_UNIT = "+" + "----+" * lane_count
+        def lane_posx(lane_idx):
+            return lane_x + 1 + lane_idx * 5
+    elif mode == '6K':
+        lane_count = 6
+        LANE_UNIT = "|" + "    |" * lane_count
+        JUDGE_UNIT = "+" + "----+" * lane_count
+        def lane_posx(lane_idx):
+            return lane_x + 1 + lane_idx * 5
     elif mode == '5K':
         lane_count = 6
+        LANE_UNIT = "|" + "    |" * lane_count
+        JUDGE_UNIT = "+" + "----+" * lane_count
+        def lane_posx(lane_idx):
+            return lane_x + 1 + lane_idx * 5
+    elif mode == '4K':
+        lane_count = 4
         LANE_UNIT = "|" + "    |" * lane_count
         JUDGE_UNIT = "+" + "----+" * lane_count
         def lane_posx(lane_idx):
@@ -93,10 +111,14 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
         required_x = 100
     elif mode == '10K':
         required_x = 80
+    elif mode == '9K':
+        required_x = 75
     elif mode == '7K':
         required_x = 70
-    else:  # 5K
+    elif mode == '6K' or mode == '5K':
         required_x = 60
+    else:  # 4K
+        required_x = 50
 
     def calculate_y(event, player, judgement_y, player_height, scale):
         """イベントの時刻/ビートから描画上のY座標と秒数を計算する"""
