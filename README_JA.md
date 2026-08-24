@@ -109,6 +109,7 @@ Shinonome-Mini -- Minimal Console BMS Player
 --mode=5k
 --mode=6k
 --mode=7k
+--mode=9k
 --mode=10k
 --mode=14k
 --mini #デフォルトの画面
