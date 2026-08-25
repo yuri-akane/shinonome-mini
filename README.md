@@ -40,6 +40,15 @@ python3 main.py path/to/your_chart.bms
 - Press **Esc** to quit (configurable via settings).
 - If the display looks odd, set the terminal to fullscreen or smaller font-size.
 
+## playlists
+```bash
+python3 bmsfd.py
+```
+- fd-like playlist.
+- key_up/k: move up, key_down/j: move down, enter: select dir or play bms, backspace: back to parent dir, esc: exit
+- "l": list all bms of subdir recursively. (may cause long time wait...）toggle for default view.
+- Configure settings.toml and set your bms folders to "allowed_roots".
+
 ## menu window (example)
 - press key to toggle option, and Enter key to start.
 ```
@@ -148,7 +157,6 @@ normal gauge.
 
 ## future support(to ver2.50)
 - display option(--tiny: more tiny size)
-- playlists → (planned for a separate program later)
 
 ## this program doesn't support:
 - movie or image (BMP, BGA)
@@ -193,3 +201,4 @@ normal gauge.
 - 1.62 9keys(pms), fix #RANDOM
 - 1.63 4keys/6keys
 - 1.64 cli options
+- 1.65 add playlists (bmsfd.py), fix 4keys/6keys ch

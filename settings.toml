@@ -1,4 +1,8 @@
-# settings.toml – configuration for Shinonome Mini ver1.62+
+# settings.toml – configuration for Shinonome Mini ver1.65+
+
+#roots for simple browser
+#ここをお持ちのbmsのpathに書き換えてください。
+allowed_roots = ["../tmp","../tmp2"]
 
 [scratch]
 side="left" #"left" or "right"

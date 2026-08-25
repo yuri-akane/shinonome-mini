@@ -781,17 +781,17 @@ class BmsonParser:
         # Mapping from bmson x-lane values to BMS channels
         if detected_mode == '4K':
             X_TO_CHANNEL_NORMAL = {
-                1: "11", 2: "12", 3: "13", 4: "14"
+                1: "11", 2: "12", 3: "14", 4: "15"
             }
             X_TO_CHANNEL_LN = {
-                1: "51", 2: "52", 3: "53", 4: "54"
+                1: "51", 2: "52", 3: "54", 4: "55"
             }
         elif detected_mode == '6K':
             X_TO_CHANNEL_NORMAL = {
-                1: "11", 2: "12", 3: "13", 4: "14", 5: "15", 6: "18"
+                1: "11", 2: "12", 3: "13", 4: "15", 5: "18", 6: "19"
             }
             X_TO_CHANNEL_LN = {
-                1: "51", 2: "52", 3: "53", 4: "54", 5: "55", 6: "58"
+                1: "51", 2: "52", 3: "53", 4: "55", 5: "58", 6: "59"
             }
         elif detected_mode == '9K':
             X_TO_CHANNEL_NORMAL = {

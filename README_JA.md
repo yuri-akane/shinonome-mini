@@ -40,6 +40,15 @@ python3 main.py path/to/your_chart.bms
 - **Esc** キーで終了します。（設定で変更可）
 - 表示がおかしかったらterminalをfullscreenにしたりフォントサイズを小さくして調整してください。
 
+## playlists
+```bash
+python3 bmsfd.py
+```
+- fdライクなプレイリストです。
+- 上下キー(またはk/j)でカーソル移動、enterで選択orプレイ、backspaceで親ディレクトリに戻る、escで終了です。
+- 「l」キーでサブディレクトリのbmsを全て一覧表示します。（量が多いと時間がかかります）もう一度押すとtoggleします。
+- 先にsettings.tomlでお持ちのbmsがあるフォルダをallowed_rootsに設定しておいてください。
+
 ## メニュー画面例
 - 各キーでオプションを切り替え、Enterで開始します。
 ```
@@ -147,7 +156,6 @@ Shinonome-Mini -- Minimal Console BMS Player
 
 ## あとでやる(ver2.50まで)
 - 画面表示オプション（--tiny: ノーツのみ、表示幅・高さも縮小）
-- プレイリスト(別プログラム)
 
 ## minimalに保つためやらない
 - 画像・動画表示
@@ -194,3 +202,4 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.62 9keys(pms), #RANDOM手直し
 - 1.63 4keys/6keys
 - 1.64 cli options
+- 1.65 add playlists (bmsfd.py), fix 4keys/6keys ch
