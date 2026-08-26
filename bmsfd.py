@@ -14,6 +14,7 @@ import curses
 from pathlib import Path
 import sys
 import subprocess
+import json
 from collections import defaultdict
 
 # Supported song file extensions (case‑insensitive)
@@ -30,46 +31,76 @@ file_props = defaultdict(lambda: {
     "bpm": ""
 })
 
-def parse_song_file(path: Path) -> dict:
+def parse_song_file(path: Path, encoding: str = "cp932") -> dict:
     """
     Read a plain‑text song file and extract the following keys if present:
         #TITLE, #SUBTITLE, #ARTIST, #SUBARTIST, #GENRE, #PLAYLEVEL, #BPM,
         #DIFFICULTY, #LEVEL
-    The value is everything after the first space on the line.
-    This function now opens files with CP932 decoding while ignoring any
-    undecodable bytes so that CP932 (shift‑JIS) encoded files containing
-    non‑ASCII characters do not raise an exception.
+    For .bmson files (JSON format) the same keys are extracted from the JSON object.
     """
     props = {}
-    try:
-        # Open with CP932 and ignore undecodable bytes
-        with path.open("r", encoding="cp932", errors="ignore") as f:
-            for line in f:
-                line = line.strip()
-                if not line.startswith("#"):
-                    continue
-                parts = line[1:].split(None, 1)  # remove leading '#'
-                if len(parts) != 2:
-                    continue
-                key, val = parts
-                key_lower = key.lower()
-                if key_lower in props:  # already set
-                    continue
-                # Keep all keys that the tests expect and those we want to display.
-                if key_lower in ("title", "subtitle", "artist",
-                                 "subartist", "genre", "playlevel", "bpm",
-                                 "difficulty", "level"):
-                    props[key_lower] = val.strip()
-    except Exception:
-        pass  # ignore unreadable files
+    ext = path.suffix.lower()
+    if ext == ".bmson":
+        try:
+            with path.open("r", encoding="utf-8", errors="ignore") as f:
+                data = json.load(f)
+            info = data.get("info", {})
+            # Basic string fields
+            for key in ("title", "subtitle", "artist"):
+                val = info.get(key)
+                if isinstance(val, str):
+                    props[key] = val.strip()
+            # Sub‑artists: take the first entry if available
+            subarts = info.get("subartists")
+            if isinstance(subarts, list) and subarts:
+                first = subarts[0]
+                if isinstance(first, str):
+                    props["subartist"] = first.strip()
+            # Genre
+            genre = info.get("genre")
+            if isinstance(genre, str):
+                props["genre"] = genre.strip()
+            # Play level (level field in bmson)
+            level = info.get("level")
+            if isinstance(level, (int, float)):
+                props["playlevel"] = str(level)
+            # BPM (init_bpm field in bmson)
+            init_bpm = info.get("init_bpm")
+            if isinstance(init_bpm, (int, float)):
+                props["bpm"] = str(init_bpm)
+        except Exception:
+            # Malformed JSON or read error; ignore and return empty dict
+            pass
+    else:
+        try:
+            with path.open("r", encoding=encoding, errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line.startswith("#"):
+                        continue
+                    parts = line[1:].split(None, 1)  # remove leading '#'
+                    if len(parts) != 2:
+                        continue
+                    key, val = parts
+                    key_lower = key.lower()
+                    if key_lower in props:  # already set
+                        continue
+                    # Keep all keys that the tests expect and those we want to display.
+                    if key_lower in ("title", "subtitle", "artist",
+                                     "subartist", "genre", "playlevel", "bpm",
+                                     "difficulty", "level"):
+                        props[key_lower] = val.strip()
+        except Exception:
+            pass  # ignore unreadable files
     return props
 
 # ----------------------------------------------------------------------
-def load_settings() -> set[Path]:
+def load_settings() -> dict:
     """
     Load allowed root directories from settings.toml in the repository root.
     If the file or key is missing, all paths are considered allowed.
-    Returns a set of absolute Path objects.
+    Also reads the BMS encoding setting and returns it as part of the config.
+    Returns a dictionary with keys 'roots' (set[Path]) and 'encoding' (str).
     """
     try:
         import tomllib
@@ -79,20 +110,22 @@ def load_settings() -> set[Path]:
     repo_root = Path(__file__).resolve().parent
     settings_file = repo_root / "settings.toml"
     if not settings_file.exists():
-        return set()  # allow all
+        return {"roots": set(), "encoding": "cp932"}  # allow all, default encoding
 
     try:
         with settings_file.open("rb") as f:
             data = tomllib.load(f)
     except Exception:  # pragma: no cover
-        return set()
+        return {"roots": set(), "encoding": "cp932"}
 
     roots = data.get("allowed_roots", [])
     allowed = set()
     for r in roots:
         p = (repo_root / r).resolve()
         allowed.add(p)
-    return allowed
+
+    encoding = data.get("bms", {}).get("encoding", "cp932")
+    return {"roots": allowed, "encoding": encoding}
 
 def is_allowed(target: Path, allowed_roots: set[Path]) -> bool:
     """
@@ -119,19 +152,19 @@ def is_allowed(target: Path, allowed_roots: set[Path]) -> bool:
 # ----------------------------------------------------------------------
 def open_file_with_cnnm(stdscr, path: Path) -> curses.window:
     """
-    Temporarily leave curses mode to run bms on the given file.
-    After bms exits, re‑enter curses and restore the terminal state.
+    Temporarily leave curses mode to run cnnm on the given file.
+    After cnnm exits, re‑enter curses and restore the terminal state.
     Returns the new stdscr window object for continued use.
     """
-    # End curses so that nano can take over the terminal
+    # End curses so that cnnm can take over the terminal
     curses.endwin()
     try:
-        subprocess.run(["python3", "main.py", str(path)])
+        subprocess.run(["python3", "cnnm.py", str(path)])
     finally:
-        # Reinitialize curses after nano exits
+        # Reinitialize curses after cnnm exits
         new_stdscr = curses.initscr()
         curses.curs_set(0)
-        return new_stdscr
+    return new_stdscr
 
 # ----------------------------------------------------------------------
 def collect_bms_files(root: Path) -> list[Path]:
@@ -149,7 +182,9 @@ def main(stdscr):
     # --------------------------------------------------------------
     # 1. Initialise state
     # --------------------------------------------------------------
-    allowed_roots = load_settings()
+    config = load_settings()
+    allowed_roots = config["roots"]
+    encoding = config.get("encoding", "cp932")
 
     config_msg = None
     if not allowed_roots:
@@ -459,7 +494,7 @@ def main(stdscr):
             if not list_mode:
                 if not sel_entry.is_dir() and sel_entry.suffix.lower() in SUPPORTED_EXTENSIONS:
                     try:
-                        props = parse_song_file(path / sel_entry)
+                        props = parse_song_file(path / sel_entry, encoding)
                         preview_lines = []
                         # Display order requested by the user.
                         order = ["genre", "title", "subtitle", "artist",
@@ -485,7 +520,7 @@ def main(stdscr):
             else:
                 # In list mode, sel_entry is a file path
                 try:
-                    props = parse_song_file(sel_entry)
+                    props = parse_song_file(sel_entry, encoding)
                     preview_lines = []
                     order = ["genre", "title", "subtitle", "artist",
                              "subartist", "playlevel", "bpm"]

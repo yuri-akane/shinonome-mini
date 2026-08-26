@@ -35,7 +35,7 @@ pip3 install miniaudio pynput numpy
 
 ## 実行例
 ```bash
-python3 main.py path/to/your_chart.bms
+python3 cnnm.py path/to/your_chart.bms
 ```
 - **Esc** キーで終了します。（設定で変更可）
 - 表示がおかしかったらterminalをfullscreenにしたりフォントサイズを小さくして調整してください。
@@ -203,3 +203,4 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.63 4keys/6keys
 - 1.64 cli options
 - 1.65 add playlists (bmsfd.py), fix 4keys/6keys ch
+- 1.66 rename main.py->cnnm.py, fix playlists with bmson, fix 4keys/6keys mirror/random

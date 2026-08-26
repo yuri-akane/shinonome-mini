@@ -34,7 +34,7 @@ pip3 install miniaudio pynput numpy
 
 ## Running the game
 ```bash
-python3 main.py path/to/your_chart.bms
+python3 cnnm.py path/to/your_chart.bms
 ```
 - The player will launch a curses UI.
 - Press **Esc** to quit (configurable via settings).
@@ -202,3 +202,4 @@ normal gauge.
 - 1.63 4keys/6keys
 - 1.64 cli options
 - 1.65 add playlists (bmsfd.py), fix 4keys/6keys ch
+- 1.66 rename main.py->cnnm.py, fix playlists with bmson, fix 4keys/6keys mirror/random
