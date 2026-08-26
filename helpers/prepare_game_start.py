@@ -16,7 +16,13 @@ def prepare_game_start(player, opt_scratch_side, channel_to_lane, lane_chars, KE
     base_map = get_channel_to_lane_map(mode, opt_scratch_side)
     lane_chars = get_lane_chars(mode, opt_scratch_side)
 
-    if mode == '9K':
+    if mode == '4K':
+        lanes_1p = [0, 1, 2, 3]
+        lanes_2p = []
+    elif mode == '6K':
+        lanes_1p = [0, 1, 2, 3, 4, 5]
+        lanes_2p = []
+    elif mode == '9K':
         lanes_1p = [0, 1, 2, 3, 4, 5, 6, 7, 8]
         lanes_2p = []
     elif mode == '5K':
