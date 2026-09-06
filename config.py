@@ -339,6 +339,21 @@ def load_use_pynput() -> bool:
     mod_cfg = data.get('modifiers', {})
     return mod_cfg.get('use_pynput', True)
 
+def load_display_mode() -> str:
+    """settings.toml の [display] mode を読み込む。
+    "mini", "tiny", "none" ("soundonly") のいずれかを返す。デフォルトは "mini"。
+    """
+    data = _load_toml()
+    if not data:
+        return "mini"
+    disp_cfg = data.get('display', {})
+    mode = str(disp_cfg.get('mode', 'mini')).lower().strip()
+    if mode in ('none', 'soundonly'):
+        return 'soundonly'
+    elif mode == 'tiny':
+        return 'tiny'
+    return 'mini'
+
 def load_scratch_side() -> str:
     """settings.toml の [scratch] side を読み込む。
     SP時のスクラッチ位置を "left" または "right" で返す。

@@ -2,7 +2,7 @@ def prepare_game_start(player, opt_scratch_side, channel_to_lane, lane_chars, KE
                        judgement_y_config, judgement_offset_ms_config, opt_autoscratch,
                        opt_hard, opt_easy, opt_solid, opt_show_measure_lines,
                        opt_show_ln_end_head, opt_hispeed, speedup_code, speeddown_code,
-                       play_opts, ui_mirror, ui_random):
+                       play_opts, ui_mirror, ui_random, display_mode="mini"):
     """
     Prepare game start configuration based on current options.
     It returns a dictionary of settings to be passed to make_on_update and
@@ -14,7 +14,7 @@ def prepare_game_start(player, opt_scratch_side, channel_to_lane, lane_chars, KE
     mode = player.chart.get('mode', '7K').upper()
 
     base_map = get_channel_to_lane_map(mode, opt_scratch_side)
-    lane_chars = get_lane_chars(mode, opt_scratch_side)
+    lane_chars = get_lane_chars(mode, opt_scratch_side, display_mode=display_mode)
 
     if mode == '4K':
         lanes_1p = [0, 1, 2, 3]

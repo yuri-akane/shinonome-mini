@@ -1,10 +1,18 @@
 import time
 import os
-#from audio import AudioEngine
-from parser import BmsonParser, BmsParser
+from parser.bmsparser import BmsParser
+from parser.bmsonparser import BmsonParser
 import config
-#gauge関係は将来的にすべてgaugeモジュールに移動する
-from player.gauge import _hard_gauge_loss, _solid_gauge_gain_factor, _set_gauge_loss_factor, _reset_gauge, set_gauge_increment
+from timing import estimated_total
+from player.gauge import (
+    _hard_gauge_loss,
+    _solid_gauge_gain_factor,
+    _set_gauge_loss_factor,
+    _reset_gauge,
+    set_gauge_increment,
+    init_gauge,
+    update_gauge,
+)
 
 class Player:
     def __init__(self, audio_engine, channel_to_lane):
@@ -156,9 +164,7 @@ class Player:
         is_bmson = self.chart.get('is_bmson', False) if self.chart else False
 
         if is_bmson:
-            # bmson: total は相対値(デフォルト=100)。
-            # parserでtotalが0以下や未設定のときはestimated_total()で埋めてあるので基本的には来ないが念のため。
-            from timing import estimated_total
+            # bmson: total は相対値(デフォルト=100)。標準TOTAL値をestimated_total()で算出する。
             if total is None or total < 0:
                 total = 100.0  # デフォルト値
             base = estimated_total(total_playable)
@@ -166,9 +172,6 @@ class Player:
             return base * (float(total) / 100.0) / total_playable
         else:
             # BMS: total は絶対値（全PERFECT時のゲージ増加量合計%）
-            if total is None:  # parserで処理できてればそもそもここに来ないはずだが…
-                from timing import estimated_total
-                total = estimated_total(total_playable)
             # PERFECT/GREAT時の増加量 (総ノーツを全てPERFECT/GREATで叩いたときにTOTAL%増えるようにする)
             return float(total) / total_playable
 
@@ -192,8 +195,9 @@ class Player:
         self.last_key_press_time[lane_index] = current_time
 
         # もし該当レーンでロングノートがアクティブ（押しっぱなし中）なら、リピート入力は無視する
-        if lane_index in self.active_lns:
-            return
+        #enbugのため一時的に除外
+        #if lane_index in self.active_lns:
+        #    return
 
         self.last_any_key_press_time = current_time
 
@@ -260,7 +264,7 @@ class Player:
                     if self.solid_gauge and not self.hard_mode: #複雑なので、あとでgauge.pyかmine.pyにコードを移動
                         damage /= 3.0
                     
-                    self.gauge = max(0.0, self.gauge - damage)
+                    update_gauge(self, max(0.0, self.gauge - damage))
                     self.last_judgement = "MINE"
                     self.judgement_time = current_time
                     if self.hard_mode and self.gauge <= 0.0:
@@ -285,7 +289,7 @@ class Player:
                 inc = self.perf_gauge_inc
                 if self.solid_gauge:
                     inc *= _solid_gauge_gain_factor(self.gauge)
-                self.gauge = min(100.0, self.gauge + inc)
+                update_gauge(self, min(100.0, self.gauge + inc))
                 is_hit = True
             elif adjusted_diff <= great_w:
                 self.last_judgement = "GREAT"
@@ -295,7 +299,7 @@ class Player:
                 inc = self.great_gauge_inc
                 if self.solid_gauge:
                     inc *= _solid_gauge_gain_factor(self.gauge)
-                self.gauge = min(100.0, self.gauge + inc)
+                update_gauge(self, min(100.0, self.gauge + inc))
                 is_hit = True
             elif adjusted_diff <= good_w:
                 self.last_judgement = "GOOD"
@@ -304,7 +308,7 @@ class Player:
                 inc = self.good_gauge_inc
                 if self.solid_gauge:
                     inc *= _solid_gauge_gain_factor(self.gauge)
-                self.gauge = min(100.0, self.gauge + inc)
+                update_gauge(self, min(100.0, self.gauge + inc))
                 is_hit = True
             else:
                 self.last_judgement = "BAD"
@@ -312,12 +316,12 @@ class Player:
                 self.combo = 0
                 if self.hard_mode:
                     loss = _hard_gauge_loss(self.gauge, is_miss=False)
-                    self.gauge = max(0.0, self.gauge + loss)
+                    update_gauge(self, max(0.0, self.gauge + loss))
                     if self.gauge <= 0.0:
                         self.is_dead = True
                         self.is_playing = False
                 else:
-                    self.gauge = max(0.0, self.gauge - (4.0 * self.loss_factor))
+                    update_gauge(self, max(0.0, self.gauge - (4.0 * self.loss_factor)))
 
             # ロングノートの始点ノーツを正しく叩けた場合、アクティブにする
             if is_hit and best_event.get('ln_state') == 'start':
@@ -350,7 +354,7 @@ class Player:
         self.last_key_press_time = [0.0] * 16
         
         self.loss_factor = _set_gauge_loss_factor(self.easy_mode, self.solid_gauge)
-        self.gauge = _reset_gauge(self.solid_gauge, self.hard_mode)
+        init_gauge(self, self.solid_gauge, self.hard_mode)
 
     def play(self, on_update=None, auto_play=True):
         if not self.chart:
@@ -441,7 +445,27 @@ class Player:
                             if event.get('sound_id'):
                                 limit = self._get_polyphony_limit(event['sound_id'])
                                 self.audio.play(event['sound_id'], limit)
+                            #event['state'] = 1
+                            # ------------------------------------------------------------------
+                            # Auto‑play gauge handling – treat every non‑scratch note as a PERFECT hit. <- ?
+                            # ------------------------------------------------------------------
+                            #if not is_scratch:
+                            # Increment gauge as if the player had hit it perfectly.
+                            inc = self.perf_gauge_inc
+                            if self.solid_gauge:
+                                inc *= _solid_gauge_gain_factor(self.gauge)
+                            update_gauge(self, min(100.0, self.gauge + inc))
+
+                            # Update combo / max_combo just like a real hit.
+                            self.combo += 1
+                            self.max_combo = max(self.max_combo, self.combo)
+
                             event['state'] = 1
+
+                            # For long notes, activate the start event so that its end will be handled later.
+                            if event.get('ln_state') == 'start':
+                                self.active_lns[lane_idx] = event
+
                     event_index += 1
                     continue
                 else:
@@ -479,12 +503,12 @@ class Player:
                             self.combo = 0
                             if self.hard_mode:
                                 loss = _hard_gauge_loss(self.gauge, is_miss=True)
-                                self.gauge = max(0.0, self.gauge + loss)
+                                update_gauge(self, max(0.0, self.gauge + loss))
                                 if self.gauge <= 0.0:
                                     self.is_dead = True
                                     self.is_playing = False
                             else:
-                                self.gauge = max(0.0, self.gauge - (6.0 * self.loss_factor))
+                                update_gauge(self, max(0.0, self.gauge - (6.0 * self.loss_factor)))
                             self.judgement_time = current_time
 
                             # もしロングノートの始点を見逃しMISSしたなら、終端も自動的にMISS扱いにする

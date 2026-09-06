@@ -3,21 +3,29 @@ import time
 import sys
 import os
 import argparse
-import tomllib
-from pathlib import Path
+#import tomllib
+#from pathlib import Path
+
+# Windows では msvcrt を使い、POSIX では select をそのまま使用する
+try:
+    import msvcrt # Windows
+except ImportError:
+    msvcrt = None
+    import select # POSIX
+
 from audio.core import AudioEngine
 from player.core import Player
-# Import new helper modules
 from helpers.load_initial_settings import load_initial_settings
 from helpers.prepare_game_start import prepare_game_start
 import config
 from on_update import make_on_update
-import random
-from constants import (
-    CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT,
-    LANE_CHARS_LEFT, LANE_CHARS_RIGHT,
-    KEY_NAMES_DP, KEY_NAMES_RIGHT, KEY_NAMES_LEFT
-)
+from ui.result import show_result
+#import random
+#from constants import (
+#    CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT,
+#    LANE_CHARS_LEFT, LANE_CHARS_RIGHT,
+#    KEY_NAMES_DP, KEY_NAMES_RIGHT, KEY_NAMES_LEFT
+#)
 # Added imports for missing functions used in main()
 from config import load_key_config, load_modifier_keys
 
@@ -87,11 +95,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('-h', '--hard',        dest='hard',         action='store_true', help='Force HARD gauge on')
     parser.add_argument(      '--solid',       dest='solid',        action='store_true', help='Force SOLID gauge on')
     parser.add_argument('-s', '--autoscratch', dest='autoscratch',  action='store_true', help='Force AUTO SCRATCH on')
+    parser.add_argument(      '--stats',       dest='stats',        action='store_true', help='Output performance stats to stdout upon song completion')
 
     # --- Display mode (mutually exclusive) ---
     disp = parser.add_mutually_exclusive_group()
     disp.add_argument('--soundonly', dest='soundonly', action='store_true', help='Audio-only mode (no UI, forces autoplay)')
-    disp.add_argument('--tiny',      dest='tiny',      action='store_true', help='Tiny display mode (placeholder, same as --mini for now)')
+    disp.add_argument('--none',      dest='none',      action='store_true', help='No UI mode (same as --soundonly)')
+    disp.add_argument('--tiny',      dest='tiny',      action='store_true', help='Tiny display mode (1-char width, minimal UI)')
     disp.add_argument('--mini',      dest='mini',      action='store_true', help='Normal display mode (default)')
 
     # --- Menu control ---
@@ -118,12 +128,19 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     # Derive display_mode string
-    if args.soundonly:
+    if args.soundonly or args.none:
         args.display_mode = 'soundonly'
+        args.cli_display_mode_set = True
     elif args.tiny:
         args.display_mode = 'tiny'
-    else:
+        args.cli_display_mode_set = True
+    elif args.mini:
         args.display_mode = 'mini'
+        args.cli_display_mode_set = True
+    else:
+        from config import load_display_mode
+        args.display_mode = load_display_mode()
+        args.cli_display_mode_set = False
 
     # Derive force_mode
     raw_mode = args.mode_hint or args.mode
@@ -137,11 +154,21 @@ def parse_args() -> argparse.Namespace:
     else:
         args.force_mode = None
 
-    # soundonly implies autoplay
-    if args.display_mode == 'soundonly':
+    # soundonly / none implies autoplay
+    if args.display_mode in ('soundonly', 'none'):
         args.autoplay = True
 
     return args
+
+
+def safe_addstr(stdscr, y: int, x: int, text: str, attr=curses.A_NORMAL):
+    """Safely print text to stdscr without raising curses.error when clipping boundaries."""
+    try:
+        max_y, max_x = stdscr.getmaxyx()
+        if 0 <= y < max_y and 0 <= x < max_x:
+            stdscr.addstr(y, x, text[:max_x - x], attr)
+    except curses.error:
+        pass
 
 
 def run_soundonly(args):
@@ -218,82 +245,34 @@ def run_soundonly(args):
         init_settings['opt_random'],
     )
 
-    print('Playing... (Press Ctrl+C to stop)')
-    try:
-        player.play(on_update=None, auto_play=True)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        ae.close()
+    print('Playing... (Press Enter to stop)')
 
-    print('\nDone.')
+    # Dummy on_update for quit_key handling
+    def dummy_on_update(current_time, events, event_index, initial_bpm,
+                        resolution, auto_play):
+        """
+        非ブロッキングで入力を確認し、行単位で読み込んだら停止。
+        Windows では msvcrt.kbhit()/getwch() を使用し、POSIX では
+        select.select([sys.stdin], [], [], 0) をそのまま利用する。
+        """
+        if msvcrt is not None:          # Windows
+            if msvcrt.kbhit():
+                ch = msvcrt.getwch()    # Unicode 文字を取得
+                # CR / LF が押されたら停止
+                if ch in ('\r', '\n'):
+                    player.is_playing = False
+        else:                            # POSIX (Linux/macOS)
+            if select.select([sys.stdin], [], [], 0)[0]:
+                # readline() はバッファにある行全体（改行付き）を返すので、
+                # その時点で「Enter」が押されたことになる。
+                sys.stdin.readline()
+                player.is_playing = False
 
-def _show_game_over(stdscr, player, quit_key_code):
-    """HARDゲージが0%に達したときのGAME OVER画面を表示する。
-    任意キーを受け取るまでブロックする。その後呼び出し元がプログラムを終了させる。
-    """
-    try:
-        curses.curs_set(0)
-        stdscr.nodelay(False)
-    except curses.error:
-        pass
-    stdscr.erase()
-    max_y, max_x = stdscr.getmaxyx()
-
-    box_w = 50
-    box_h = 18
-    bx = max(0, (max_x - box_w) // 2)
-    by = max(0, (max_y - box_h) // 2)
-
-    def pr(row, col, text, attr=curses.A_NORMAL):
-        try:
-            stdscr.addstr(by + row, bx + col, text, attr)
-        except curses.error:
-            pass
-
-    border = "+" + "-" * (box_w - 2) + "+"
-    blank  = "|" + " " * (box_w - 2) + "|"
-    for r in range(box_h):
-        pr(r, 0, border if r in (0, box_h - 1) else blank)
-
-    title = "G A M E   O V E R"
-    pr(2, (box_w - len(title)) // 2, title, curses.A_BOLD | curses.A_STANDOUT)
-
-    sub = "~  Hard Gauge reached 0%  ~"
-    pr(4, (box_w - len(sub)) // 2, sub)
-
-    pr(6, 4, "---  Results  ---")
-    stats = [
-        ("PERFECT", player.perfect_count),
-        ("GREAT  ", player.great_count),
-        ("GOOD   ", player.good_count),
-        ("BAD    ", player.bad_count),
-        ("MISS   ", player.miss_count),
-    ]
-    for i, (label, val) in enumerate(stats):
-        pr(7 + i, 5, f"{label} : {val:5d}")
-
-    max_score = player.total_playable_notes * 2
-    pr(13, 5, f"EX SCORE : {player.ex_score:5d} / {max_score:5d}")
-    pr(14, 5, f"MAX COMBO: {player.max_combo:5d}")
-
-    #footer = "Press any key to exit"
-    footer = f"Press [{config.quit_key_name}] to Quit"
-    pr(16, (box_w - len(footer)) // 2, footer, curses.A_DIM)
-
-    stdscr.refresh()
-    while True:
-        time.sleep(0.05) #ここのsleepはメニュー画面での話なのでこれ(20FPS)で十分
-        key = stdscr.getch()
-        if key == quit_key_code:
-            break
-        else:
-            continue
-    try:
-        stdscr.nodelay(True)
-    except curses.error:
-        pass
-
+    player.play(on_update=dummy_on_update, auto_play=True)
+    ae.close()
+    if init_settings.get('opt_stdout_result', False):
+        from helpers.stdout_result import stdout_result_stats
+        stdout_result_stats(player)
 
 def main(stdscr, args):
     # Some terminals may not support cursor visibility changes; ignore errors
@@ -339,6 +318,8 @@ def main(stdscr, args):
     opt_solid = init_settings['opt_solid']
     opt_show_measure_lines = init_settings['opt_show_measure_lines']
     opt_show_ln_end_head = init_settings.get('opt_show_ln_end_head', True)
+    opt_show_result = init_settings.get('opt_show_result', False)
+    opt_stdout_result = init_settings.get('opt_stdout_result', False)
     opt_hispeed = init_settings['opt_hispeed']
     opt_autoscratch = init_settings['opt_autoscratch']
 
@@ -361,9 +342,9 @@ def main(stdscr, args):
         while not player.is_audio_ready:
             stdscr.erase()
             loaded, total = player.audio.loading_progress
-            stdscr.addstr(0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
-            stdscr.addstr(2, 2, f"Loading audio... ({loaded}/{total})")
-            stdscr.addstr(3, 2, "Starting automatically after load...")
+            safe_addstr(stdscr, 0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
+            safe_addstr(stdscr, 2, 2, f"Loading audio... ({loaded}/{total})")
+            safe_addstr(stdscr, 3, 2, "Starting automatically after load...")
             stdscr.refresh()
             time.sleep(0.1)
 
@@ -388,6 +369,7 @@ def main(stdscr, args):
             play_opts,
             opt_mirror,
             opt_random,
+            display_mode=display_mode,
         )
         channel_to_lane = result['channel_to_lane']
         lane_chars       = result['lane_chars']
@@ -395,46 +377,48 @@ def main(stdscr, args):
         settings         = result['settings']
 
         on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE,
-                                  judgement_y_config, settings, lane_chars)
+                                  judgement_y_config, settings, lane_chars,
+                                  display_mode=display_mode)
         player.play(on_update=on_update, auto_play=opt_autoplay)
-        if player.is_dead:
-            _show_game_over(stdscr, player, quit_key_code)
+        if not opt_autoplay and (player.is_dead or opt_show_result):
+            show_result(stdscr, player, quit_key_code, display_mode=display_mode)
         ae.close()
-        return
+        return player, opt_stdout_result, True
 
+    played = False
     while running:
         stdscr.erase()
-        stdscr.addstr(0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
+        safe_addstr(stdscr, 0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
 
         if player.chart:
             chart_mode = player.chart.get('mode', '7K').upper()
             is_dp_mode = (chart_mode in ('10K', '14K'))
             has_scratch = (chart_mode in ('5K', '7K', '10K', '14K'))
-            stdscr.addstr(1, 2, f"Song: {player.chart['info'].get('title', 'Unknown')} / Artist: {player.chart['info'].get('artist', 'Unknown')}")
-            stdscr.addstr(2, 2, f"MODE: {chart_mode} ({'DP' if is_dp_mode else 'SP'})")
+            safe_addstr(stdscr, 1, 2, f"Song: {player.chart['info'].get('title', 'Unknown')} / Artist: {player.chart['info'].get('artist', 'Unknown')}")
+            safe_addstr(stdscr, 2, 2, f"MODE: {chart_mode} ({'DP' if is_dp_mode else 'SP'})")
 
             # ロード状態の表示
             if player.audio.is_loading:
                 loaded, total = player.audio.loading_progress
-                stdscr.addstr(3, 2, f"Loading audio... ({loaded}/{total})")
+                safe_addstr(stdscr, 3, 2, f"Loading audio... ({loaded}/{total})")
             else:
-                stdscr.addstr(3, 2, "Audio ready.                          ")
+                safe_addstr(stdscr, 3, 2, "Audio ready.                          ")
 
             # プレイオプション設定の表示
-            stdscr.addstr(4, 2, "=== PLAY OPTIONS ===")
+            safe_addstr(stdscr, 4, 2, "=== PLAY OPTIONS ===")
             row = 5
-            stdscr.addstr(row, 2, f"  [A] AUTO PLAY    : {'ON' if opt_autoplay else 'OFF'}"); row += 1
+            safe_addstr(stdscr, row, 2, f"  [A] AUTO PLAY    : {'ON' if opt_autoplay else 'OFF'}"); row += 1
             if has_scratch:
-                stdscr.addstr(row, 2, f"  [S] AUTO SCRATCH : {'ON' if opt_autoscratch else 'OFF'}"); row += 1
-            stdscr.addstr(row, 2, f"  [M] MIRROR       : {'ON' if opt_mirror else 'OFF'}"); row += 1
-            stdscr.addstr(row, 2, f"  [R] RANDOM       : {'ON' if opt_random else 'OFF'}"); row += 1
-            stdscr.addstr(row, 2, f"  [E] EASY         : {'ON' if opt_easy else 'OFF'}"); row += 1
-            stdscr.addstr(row, 2, f"  [H] HARD GAUGE   : {'ON' if opt_hard else 'OFF'}"); row += 1
-            stdscr.addstr(row, 2, f"  [O] SHOW MEASURES: {'ON' if opt_show_measure_lines else 'OFF'}"); row += 1
-            stdscr.addstr(row, 2, f"  [keyup/down] HS (Hispeed) : {opt_hispeed:.1f}"); row += 1
+                safe_addstr(stdscr, row, 2, f"  [S] AUTO SCRATCH : {'ON' if opt_autoscratch else 'OFF'}"); row += 1
+            safe_addstr(stdscr, row, 2, f"  [M] MIRROR       : {'ON' if opt_mirror else 'OFF'}"); row += 1
+            safe_addstr(stdscr, row, 2, f"  [R] RANDOM       : {'ON' if opt_random else 'OFF'}"); row += 1
+            safe_addstr(stdscr, row, 2, f"  [E] EASY         : {'ON' if opt_easy else 'OFF'}"); row += 1
+            safe_addstr(stdscr, row, 2, f"  [H] HARD GAUGE   : {'ON' if opt_hard else 'OFF'}"); row += 1
+            safe_addstr(stdscr, row, 2, f"  [O] SHOW MEASURES: {'ON' if opt_show_measure_lines else 'OFF'}"); row += 1
+            safe_addstr(stdscr, row, 2, f"  [keyup/down] HS (Hispeed) : {opt_hispeed:.1f}"); row += 1
             if not is_dp_mode and has_scratch:
-                stdscr.addstr(row, 2, f"  [L] SCRATCH SIDE : {opt_scratch_side.upper()}"); row += 1
-            stdscr.addstr(row, 2, f"  [$] SOLID GAUGE  : {'ON' if opt_solid else 'OFF'}"); row += 2
+                safe_addstr(stdscr, row, 2, f"  [L] SCRATCH SIDE : {opt_scratch_side.upper()}"); row += 1
+            safe_addstr(stdscr, row, 2, f"  [$] SOLID GAUGE  : {'ON' if opt_solid else 'OFF'}"); row += 2
 
             toggle_keys = "A"
             if has_scratch:
@@ -444,16 +428,16 @@ def main(stdscr, args):
                 toggle_keys += "/L"
             toggle_keys += "/$"
 
-            stdscr.addstr(row, 2, f"Press key [{toggle_keys}] to toggle option."); row += 2
+            safe_addstr(stdscr, row, 2, f"Press key [{toggle_keys}] to toggle option."); row += 2
             if player.is_audio_ready:
-                stdscr.addstr(row, 2, "Press [Enter] to START PLAY"); row += 1
+                safe_addstr(stdscr, row, 2, "Press [Enter] to START PLAY"); row += 1
             else:
-                stdscr.addstr(row, 2, "[Enter] will be available after audio loads"); row += 1
-            stdscr.addstr(row, 2, f"Press [{config.quit_key_name}] to Quit")
+                safe_addstr(stdscr, row, 2, "[Enter] will be available after audio loads"); row += 1
+            safe_addstr(stdscr, row, 2, f"Press [{config.quit_key_name}] to Quit")
         else:
-            stdscr.addstr(2, 2, "Please specify a BMS file as an argument.")
-            stdscr.addstr(3, 2, "Example: python3 main.py path/to/song.bms")
-            stdscr.addstr(5, 2, f"Press [{config.quit_key_name}] to Quit")
+            safe_addstr(stdscr, 2, 2, "Please specify a BMS file as an argument.")
+            safe_addstr(stdscr, 3, 2, "Example: python3 main.py path/to/song.bms")
+            safe_addstr(stdscr, 5, 2, f"Press [{config.quit_key_name}] to Quit")
 
         stdscr.refresh()
 
@@ -510,21 +494,25 @@ def main(stdscr, args):
                                             speeddown_code,
                                             play_opts,
                                             opt_mirror,   # new argument
-                                            opt_random)   # new argument
+                                            opt_random,   # new argument
+                                            display_mode=display_mode)
                 channel_to_lane = result['channel_to_lane']
                 lane_chars = result['lane_chars']
                 KEY_TO_LANE = result['KEY_TO_LANE']
                 settings = result['settings']
 
                 on_update = make_on_update(stdscr, player, quit_key_code, KEY_TO_LANE,
-                                          judgement_y_config, settings, lane_chars)
+                                          judgement_y_config, settings, lane_chars,
+                                          display_mode=display_mode)
                 player.play(on_update=on_update, auto_play=opt_autoplay)
-                if player.is_dead:
-                    _show_game_over(stdscr, player, quit_key_code)
+                if not opt_autoplay and (player.is_dead or opt_show_result):
+                    show_result(stdscr, player, quit_key_code, display_mode=display_mode)
+                played = True
                 running = False
 
         time.sleep(0.05) #ここのsleepはメニュー画面での話なのでこれ(20FPS)で十分
     ae.close()
+    return player, opt_stdout_result, played
 
 if __name__ == "__main__":
     args = parse_args()
@@ -532,4 +520,9 @@ if __name__ == "__main__":
     if args.display_mode == 'soundonly':
         run_soundonly(args)
     else:
-        curses.wrapper(main, args)
+        res = curses.wrapper(main, args)
+        if res:
+            player, opt_stdout_result, played = res
+            if played and opt_stdout_result and player:
+                from helpers.stdout_result import stdout_result_stats
+                stdout_result_stats(player)

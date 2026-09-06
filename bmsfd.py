@@ -156,6 +156,8 @@ def open_file_with_cnnm(stdscr, path: Path) -> curses.window:
     After cnnm exits, re‑enter curses and restore the terminal state.
     Returns the new stdscr window object for continued use.
     """
+    if not path.exists() or not path.is_file():
+        return stdscr
     # End curses so that cnnm can take over the terminal
     curses.endwin()
     try:
@@ -197,6 +199,8 @@ def main(stdscr):
     # otherwise show a virtual root that lists all allowed roots.
     if len(sys.argv) > 1:
         path = Path(sys.argv[1]).expanduser().resolve()
+        if not path.exists() or not path.is_dir():
+            path = Path("/")
     else:
         # Use a sentinel Path("/") to represent the virtual root
         path = Path("/")
@@ -213,11 +217,12 @@ def main(stdscr):
     # ------------------------------------------------------------------
     last_selected: dict[Path, int] = {}
 
-    # ------------------------------------------------------------------
     # State for list mode toggle
-    # ------------------------------------------------------------------
     list_mode = False          # whether we are showing the recursive BMS list
     bms_list: list[Path] | None = None  # cached list of files when in list mode
+
+    # State for status / error message
+    status_msg: str | None = None
 
     # --------------------------------------------------------------
     # 2. Main event loop
@@ -232,10 +237,12 @@ def main(stdscr):
         else:
             stdscr.addstr(0, 0, f"Path: {path}", curses.A_BOLD)
 
-        # Show configuration warning if present
-        if config_msg:
+        # Show configuration warning or status error message if present
+        display_msg = status_msg or config_msg
+        if display_msg:
             try:
-                stdscr.addnstr(1, 0, config_msg, w-1, curses.A_DIM)
+                attr = curses.A_BOLD if status_msg else curses.A_DIM
+                stdscr.addnstr(1, 0, display_msg, w-1, attr)
             except curses.error:
                 pass
 
@@ -248,7 +255,7 @@ def main(stdscr):
         # ------------------------------------------------------------------
         # Layout:
         #   0          : Path / Allowed Roots header
-        #   1 (optional): config message
+        #   1 (optional): config message / status error
         #   2/3       : blank line(s) separator
         #   preview area
         #   entries start here
@@ -260,7 +267,7 @@ def main(stdscr):
         else:
             header_row = 0
 
-        msg_rows = 1 if config_msg else 0
+        msg_rows = 1 if display_msg else 0
         prop_start_row = header_row + msg_rows + 1  # one blank line after header/message
         prop_rows = min(7, max(h - prop_start_row - 2, 0))  # leave last line for help
         entry_start_row = prop_start_row + prop_rows + 1   # one blank line after preview
@@ -287,10 +294,14 @@ def main(stdscr):
                 raw_entries = sorted(allowed_roots, key=lambda p: p.name.lower())
                 entries = [p for p in raw_entries]
             else:
-                raw_entries = [
-                    p for p in path.iterdir()
-                    if p.is_dir() or p.suffix.lower() in SUPPORTED_EXTENSIONS
-                ]
+                try:
+                    raw_entries = [
+                        p for p in path.iterdir()
+                        if p.is_dir() or p.suffix.lower() in SUPPORTED_EXTENSIONS
+                    ]
+                except (FileNotFoundError, PermissionError):
+                    raw_entries = []
+                    status_msg = f"Error: Cannot access directory ({path})"
 
                 # Populate placeholder properties for each file (no‑op yet)
                 for p in raw_entries:
@@ -351,7 +362,7 @@ def main(stdscr):
         # ------------------------------------------------------------------
         # Help / key‑function legend at the bottom line (row h‑1)
         # ------------------------------------------------------------------
-        help_msg = "Esc: quit | Backspace/..: up | Enter: open dir / play file | L: list all BMS recursively"
+        help_msg = "Esc: quit | Backspace/..: up | Enter: open dir / play file | L: list all BMS recursively (toggle)"
         try:
             stdscr.addnstr(h - 1, 0, help_msg, w-1, curses.A_DIM)
         except curses.error:
@@ -390,7 +401,10 @@ def main(stdscr):
                 if path == Path("/") and chosen.is_dir():
                     # Enter a real directory from the virtual root
                     new_path = chosen.resolve()
-                    if is_allowed(new_path, allowed_roots):
+                    if not new_path.exists() or not new_path.is_dir():
+                        status_msg = f"Error: Directory does not exist ({chosen.name})"
+                    elif is_allowed(new_path, allowed_roots):
+                        status_msg = None
                         last_selected[path] = selected
                         path = new_path
                         selected = last_selected.get(path, 0)
@@ -399,6 +413,7 @@ def main(stdscr):
                         preview_file = None
                 else:
                     if chosen.name == "..":
+                        status_msg = None
                         # Store current selection before moving up
                         last_selected[path] = selected
                         new_path = path.parent
@@ -417,7 +432,10 @@ def main(stdscr):
                             preview_file = None
                     else:
                         new_path = path / chosen
-                        if new_path.is_dir():
+                        if not new_path.exists():
+                            status_msg = f"Error: Directory does not exist ({chosen.name})"
+                        elif new_path.is_dir():
+                            status_msg = None
                             # Store current selection before moving down
                             last_selected[path] = selected
                             if is_allowed(new_path, allowed_roots):
@@ -430,6 +448,7 @@ def main(stdscr):
                             # File selected: open with cnnm and return to browser
                             stdscr = open_file_with_cnnm(stdscr, new_path)
             elif key in (curses.KEY_BACKSPACE, 127):
+                status_msg = None
                 if path != Path("/"):
                     # same as selecting ".."
                     last_selected[path] = selected
@@ -448,12 +467,13 @@ def main(stdscr):
                         preview_lines = None
                         preview_file = None
             elif key == ord('l'):
-                # Enter list mode: build recursive BMS file list for current directory
-                bms_list = collect_bms_files(path)
-                if bms_list:
-                    list_mode = True
-                    selected = 0
-                    offset = 0
+                if path != Path("/"):
+                    # Enter list mode: build recursive BMS file list for current directory
+                    bms_list = collect_bms_files(path)
+                    if bms_list:
+                        list_mode = True
+                        selected = 0
+                        offset = 0
 
         # ------------------------------------------------------------------
         # Rebuild entries if the directory changed during key handling

@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import threading
 import queue
-from typing import List, Tuple
 
 from pynput import keyboard
 
@@ -37,7 +36,7 @@ class KeyListener:
     """
 
     def __init__(self) -> None:
-        self._event_queue: "queue.Queue[Tuple[str, str]]" = queue.Queue()
+        self._event_queue: "queue.Queue[tuple[str, str]]" = queue.Queue()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -95,14 +94,14 @@ class KeyListener:
         if self._thread:
             self._thread.join(timeout=1.0)
 
-    def get_events(self) -> List[Tuple[str, str]]:
+    def get_events(self) -> list[tuple[str, str]]:
         """Retrieve and clear all queued key events.
 
         Returns:
             List of ``(event_type, key)`` tuples where ``event_type`` is
             ``"press"`` or ``"release"``.
         """
-        events: List[Tuple[str, str]] = []
+        events: list[tuple[str, str]] = []
         while not self._event_queue.empty():
             try:
                 events.append(self._event_queue.get_nowait())
@@ -127,6 +126,6 @@ def stop_key_listener() -> None:
     """Stop the module‑level default listener."""
     default_listener.stop()
 
-def get_key_events() -> List[Tuple[str, str]]:
+def get_key_events() -> list[tuple[str, str]]:
     """Get events from the module‑level default listener."""
     return default_listener.get_events()

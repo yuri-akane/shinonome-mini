@@ -7,14 +7,11 @@ except ImportError:
     start_key_listener = None
     get_key_events = None
     KEY_LISTENER_AVAILABLE = False
-from constants import (
-    CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT,
-    LANE_CHARS_LEFT, LANE_CHARS_RIGHT,
-    KEY_NAMES_DP, KEY_NAMES_RIGHT, KEY_NAMES_LEFT,
-)
+from constants import get_key_names
+from ui.factory import get_renderer
 
 
-def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_config, settings, lane_chars):
+def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_config, settings, lane_chars, display_mode="mini"):
     """Create an update callback for the player.
 
     Parameters:
@@ -24,369 +21,46 @@ def make_on_update(stdscr, player, quit_key_code, key_to_lane, judgement_y_confi
         key_to_lane: mapping of input keys to lanes
         judgement_y_config: y-position for judgement line
         settings: mutable settings dict (e.g., hispeed)
-        lane_chars: list of characters representing notes per lane
+        lane_chars: list/dict of characters representing notes per lane
+        display_mode: 'mini', 'tiny', 'none', or 'soundonly'
     """
-    #closureなので、事前に計算できるものはなるべく事前にやっておく
     def _key_code(k):
-        # Convert a key identifier to curses key code
         if isinstance(k, str):
             uk = k.upper()
             if uk == 'KEY_UP':
                 return curses.KEY_UP
             if uk == 'KEY_DOWN':
                 return curses.KEY_DOWN
-            # Fallback: single character
             return ord(k)
         return k
-    start_y = 4
-    lane_x = 4
-    base_speed = 22.0
 
     mode = player.chart.get('mode', '7K').upper()
-    is_dp = (mode in ('10K', '14K'))
-
-    if mode == '14K':
-        lane_count = 16
-        half = 8
-        LANE_UNIT = "|" + "    |" * half + " " + "|" + "    |" * half
-        JUDGE_UNIT = "+" + "----+" * half + " " + "+" + "----+" * half
-        def lane_posx(lane_idx):
-            offset = 2 if lane_idx >= half else 0
-            return lane_x + 1 + lane_idx * 5 + offset
-    elif mode == '10K':
-        lane_count = 12
-        half = 6
-        LANE_UNIT = "|" + "    |" * half + " " + "|" + "    |" * half
-        JUDGE_UNIT = "+" + "----+" * half + " " + "+" + "----+" * half
-        def lane_posx(lane_idx):
-            offset = 2 if lane_idx >= half else 0
-            return lane_x + 1 + lane_idx * 5 + offset
-    elif mode == '9K':
-        lane_count = 9
-        LANE_UNIT = "|" + "    |" * lane_count
-        JUDGE_UNIT = "+" + "----+" * lane_count
-        def lane_posx(lane_idx):
-            return lane_x + 1 + lane_idx * 5
-    elif mode == '6K':
-        lane_count = 6
-        LANE_UNIT = "|" + "    |" * lane_count
-        JUDGE_UNIT = "+" + "----+" * lane_count
-        def lane_posx(lane_idx):
-            return lane_x + 1 + lane_idx * 5
-    elif mode == '5K':
-        lane_count = 6
-        LANE_UNIT = "|" + "    |" * lane_count
-        JUDGE_UNIT = "+" + "----+" * lane_count
-        def lane_posx(lane_idx):
-            return lane_x + 1 + lane_idx * 5
-    elif mode == '4K':
-        lane_count = 4
-        LANE_UNIT = "|" + "    |" * lane_count
-        JUDGE_UNIT = "+" + "----+" * lane_count
-        def lane_posx(lane_idx):
-            return lane_x + 1 + lane_idx * 5
-    else:  # 7K
-        lane_count = 8
-        LANE_UNIT = "|" + "    |" * lane_count
-        JUDGE_UNIT = "+" + "----+" * lane_count
-        def lane_posx(lane_idx):
-            return lane_x + 1 + lane_idx * 5
-
-    from constants import get_key_names
     key_names = get_key_names(mode, settings.get('opt_scratch_side', 'left'))
-
     speedup_keycode   = _key_code(settings.get('speedup_key', '+'))
     speeddown_keycode = _key_code(settings.get('speeddown_key', '-'))
 
-    judgement_y = judgement_y_config
-    if is_dp:
-        stats_y = judgement_y + 5
-        stat_x = lane_x + (lane_count // 2) * 5 + 2
-    else:
-        stats_y = start_y
-        stat_x = lane_x + lane_count * 5 + 2
-
-    required_y = 32 if is_dp else 22
-    if mode == '14K':
-        required_x = 100
-    elif mode == '10K':
-        required_x = 80
-    elif mode == '9K':
-        required_x = 75
-    elif mode == '7K':
-        required_x = 70
-    elif mode == '6K' or mode == '5K':
-        required_x = 60
-    else:  # 4K
-        required_x = 50
-
-    def calculate_y(event, player, judgement_y, player_height, scale):
-        """イベントの時刻/ビートから描画上のY座標と秒数を計算する"""
-        target_seconds = event['time']
-        if getattr(player, 'timeline', None):
-            note_height = player.timeline.get_height_at_beat(event['beat'])
-        else:
-            note_height = target_seconds
-        y = judgement_y - int((note_height - player_height) * scale)
-        return y, target_seconds
-
-    def get_lane_index(channel, player):
-        """チャンネル名からレーン番号を判定して返す。該当しない場合はNone"""
-        if channel in player.channel_to_lane:
-            return player.channel_to_lane[channel]
-
-        # 拡張チャンネル (51-69) の処理
-        if channel.isdigit() and 51 <= int(channel) <= 69:
-            base_chan = str(int(channel) - 40)
-            return player.channel_to_lane.get(base_chan)
-
-        return None
+    renderer = get_renderer(display_mode, mode, judgement_y_config)
 
     def on_update(current_time, events, event_index, initial_bpm, resolution, auto_play):
-        # Ensure key listener is running (only start once)
         use_pynput = settings.get('use_pynput', True) and KEY_LISTENER_AVAILABLE
         if use_pynput and not getattr(on_update, "_listener_started", False):
             if start_key_listener:
                 start_key_listener()
             on_update._listener_started = True
+
+        if not renderer:
+            return
+
         try:
             stdscr.erase()
-
-            # 画面サイズの確認 (DP時に統計情報を下げたため、必要なYサイズを拡張)
-            max_y, max_x = stdscr.getmaxyx()
-            if max_y < required_y or max_x < required_x:
-                stdscr.addstr(0, 2, "=== TERMINAL SIZE TOO SMALL ===", curses.A_BOLD)
-                stdscr.addstr(2, 2, f"Required size: {required_x} cols x {required_y} rows")
-                stdscr.addstr(3, 2, f"Current size : {max_x} cols x {max_y} rows")
-
-            speed = base_speed * settings.get('hispeed', 1.0)
-            if getattr(player, 'timeline', None):
-                beat_duration = 60.0 / player.initial_bpm
-                scale = speed * beat_duration
-                _, player_height, current_bpm, _ = player.timeline.get_state(current_time)
-            else:
-                scale = speed
-                player_height = current_time
-                current_bpm = getattr(player, 'current_bpm', initial_bpm)
-
-            stdscr.addstr(0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
-            stdscr.addstr(1, 2, f"Song: {player.chart['info'].get('title', 'Unknown')} / Artist: {player.chart['info'].get('artist', 'Unknown')}")
-            stdscr.addstr(2, 2, f"BPM: {current_bpm:.1f} | Time: {current_time:.2f}s | HS: {settings.get('hispeed', 1.0):.1f}")
-
-            for y in range(start_y, judgement_y):
-                stdscr.addstr(y, lane_x, LANE_UNIT)
-
-            stdscr.addstr(judgement_y, lane_x, JUDGE_UNIT)
-
-            for idx, name in enumerate(key_names):
-                lane_idx = idx
-                is_active = (current_time - player.key_pressed_time[lane_idx] < 0.12)
-                attr = curses.A_REVERSE if is_active else curses.A_NORMAL
-                stdscr.addstr(judgement_y + 1, lane_posx(lane_idx), name, attr)
-
-            if auto_play:
-                stdscr.addstr(judgement_y + 2, lane_x, "[       AUTOPLAY MODE ACTIVE       ]", curses.A_DIM)
-            else:
-                stdscr.addstr(judgement_y + 2, lane_x, "[       MANUAL PLAY ACTIVE         ]")
-
-            stdscr.addstr(judgement_y + 4, lane_x, f"Press {config.quit_key_name} to quit playing")
-
-            filled_segments = int(player.gauge / 5.0)
-            bar_list = []
-            for i in range(20):
-                bar_list.append("=" if i < filled_segments else "-")
-            bar_list.insert(16, "|")
-            gauge_bar = "".join(bar_list)
-            gauge_attr = curses.A_BOLD
-            if player.hard_mode:
-                gauge_mode_label = "HARD "
-                gauge_mode_label2 = "SOLID" if settings['opt_solid'] else "GAUGE"
-                if player.gauge <= 30.0:
-                    gauge_attr |= curses.A_BLINK   # 低ゲージ警告
-                elif player.gauge >= 80.0:
-                    gauge_attr |= curses.A_STANDOUT
-            elif getattr(player, 'easy_mode', False):
-                gauge_mode_label = "EASY "
-                gauge_mode_label2 = "SOLID" if settings['opt_solid'] else "GAUGE"
-                if player.gauge >= 80.0:
-                    gauge_attr |= curses.A_STANDOUT
-            else:
-                gauge_mode_label = ""
-                gauge_mode_label2 = "SOLID GAUGE" if settings['opt_solid'] else "GAUGE"
-                if player.gauge >= 80.0:
-                    gauge_attr |= curses.A_STANDOUT
-            stdscr.addstr(stats_y, stat_x, f"{gauge_mode_label}{gauge_mode_label2}: [{gauge_bar}] {player.gauge:5.1f}%", gauge_attr)
-
-            max_score = player.total_playable_notes * 2
-            stdscr.addstr(stats_y + 2, stat_x, f"EX SCORE: {player.ex_score:5d} / {max_score:5d}")
-
-            combo_attr = curses.A_NORMAL
-            if player.combo > 0 and player.combo == player.max_combo:
-                combo_attr = curses.A_BOLD
-            stdscr.addstr(stats_y + 3, stat_x, f"COMBO   : {player.combo:5d}  (MAX: {player.max_combo:5d})", combo_attr)
-
-            stdscr.addstr(stats_y + 5, stat_x, f"P: {player.perfect_count:3d} G: {player.great_count:3d} g: {player.good_count:3d} B: {player.bad_count:3d} M: {player.miss_count:3d}", curses.A_UNDERLINE)
-
-            if player.last_judgement and (current_time - player.judgement_time < 0.5):
-                j_str = f"  {player.last_judgement}  "
-                attr = curses.A_BOLD
-                if player.last_judgement == "PERFECT":
-                    attr |= curses.A_UNDERLINE | curses.A_STANDOUT
-                elif player.last_judgement == "GREAT":
-                    attr |= curses.A_STANDOUT
-                elif player.last_judgement == "GOOD":
-                    attr |= curses.A_BOLD
-                elif player.last_judgement == "BAD":
-                    attr = curses.A_DIM
-                elif player.last_judgement == "MISS":
-                    attr |= curses.A_BLINK
-                elif player.last_judgement == "MINE":
-                    attr |= curses.A_REVERSE | curses.A_BLINK
-                stdscr.addstr(judgement_y + 6, lane_x + 12, j_str, attr)
-                if player.combo >= 3 and player.last_judgement in ["PERFECT", "GREAT", "GOOD"]:
-                    stdscr.addstr(judgement_y + 7, lane_x + 14, f"{player.combo} COMBO", curses.A_BOLD)
-
-            # Draw measure lines first (Background layer)
-            if getattr(player, 'show_measure_lines', True):
-                for i in range(event_index, len(events)):
-                    event = events[i]
-                    if event.get('state', 0) != 0 or event.get('channel') != 'measure_line':
-                        continue
-
-                    y, _ = calculate_y(event, player, judgement_y, player_height, scale)
-                    if y < 0: break # これ以降のイベントは画面外なので終了
-                    if start_y <= y < judgement_y:
-                        stdscr.addstr(y, lane_x, JUDGE_UNIT, curses.A_DIM)
-
-            # Draw long note bodies (Foreground layer1)
-            for i in range(event_index, len(events)):
-                event = events[i]
-                if event.get('state', 0) != 0:
-                    continue
-
-                channel = event.get('channel')
-                lane_idx = get_lane_index(channel, player) if channel else None
-                if lane_idx is None:
-                    continue
-
-                # ロングノーツの終点イベントである場合のみ処理
-                if event.get('ln_state') == 'end':
-                    start_ev = event.get('ln_partner')
-                    if not start_ev:
-                        continue
-
-                    # 1. 座標計算 (終点と始点)
-                    y_end, _ = calculate_y(event, player, judgement_y, player_height, scale)
-
-                    if start_ev.get('state', 0) == 1:
-                        y_start = judgement_y
-                    else:
-                        y_start, _ = calculate_y(start_ev, player, judgement_y, player_height, scale)
-                        
-                    # Draw start head (if not already hit) and end head for LNTYPE1
-                    note_str = lane_chars[lane_idx]
-                    x = lane_posx(lane_idx)
-
-                    # start head (visible when pending)
-                    if start_ev.get('state', 0) == 0 and start_y <= y_start < judgement_y:
-                        stdscr.addstr(y_start, x, note_str)
-                    # end head (visible when pending) - controlled by show_ln_end_head
-                    if event.get('state', 0) == 0 and start_y <= y_end < judgement_y:
-                        if settings.get('show_ln_end_head', False):
-                            stdscr.addstr(y_end, x, note_str)
-                        else:
-                            stdscr.addstr(y_end, x, " |")
-                    # draw long body
-                    for y_body in range(max(start_y, y_end + 1), min(judgement_y, y_start)):
-                        stdscr.addstr(y_body, x, " |")
-
-
-            # Draw notes (Foreground layer2)
-            for i in range(event_index, len(events)):
-                event = events[i]
-                if event.get('state', 0) != 0:
-                    continue
-
-                channel = event.get('channel')
-                # Skip measure lines (already drawn in first pass)
-                if channel == 'measure_line':
-                    continue
-
-                # Skip LN end heads in standard note loop if end head display is disabled
-                if event.get('ln_state') == 'end' and not settings.get('show_ln_end_head', False):
-                    continue
-
-                # Support standard and extended channels for rendering start notes
-                lane_idx = get_lane_index(channel, player)
-                if lane_idx is None:
-                    continue
-
-                y, target_seconds = calculate_y(event, player, judgement_y, player_height, scale)
-                if y < 0: break # これ以降のイベントは画面外なので終了
-
-                note_str = "M!" if event.get('is_mine') else lane_chars[lane_idx]
-                note_attr = curses.A_REVERSE if event.get('is_mine') else curses.A_NORMAL
-                x_pos = lane_posx(lane_idx)
-
-                if start_y <= y < judgement_y:
-                    stdscr.addstr(y, x_pos, note_str, note_attr)
-                elif y >= judgement_y:
-                    if current_time - target_seconds < 0.08:
-                        stdscr.addstr(judgement_y, x_pos, "FL", curses.A_REVERSE)
-
-            beat_seconds = 60.0 / initial_bpm
-            beat_number = int(current_time / beat_seconds)
-            if beat_number % 2 == 0:
-                stdscr.addstr(judgement_y, lane_x - 2, "*", curses.A_BOLD)
-            else:
-                stdscr.addstr(judgement_y, lane_x - 2, " ")
-            rotation_symbols = ["|", "/", "-", "\\"]
-            half_beat_number = int(current_time / (beat_seconds * 0.5))
-            rot_char = rotation_symbols[half_beat_number % 4]
-            stdscr.addstr(judgement_y + 1, lane_x - 2, rot_char, curses.A_BOLD)
-
-            # Process curses keyboard input (normal keys + esc)
-            while True:
-                ch = stdscr.getch()
-                if ch == -1:
-                    break
-                # Quit key
-                if ch == quit_key_code:
-                    player.is_playing = False
-                    continue
-                # Lane key handling
-                if ch in key_to_lane:
-                    if not auto_play:
-                        player.press_key(key_to_lane[ch])
-                    continue
-                # Hispeed adjustments (configurable keys)
-                if ch == speedup_keycode:
-                    settings['hispeed'] = min(settings.get('hispeed', 1.0) + 0.2, 100.0)
-                elif ch == speeddown_keycode:
-                    settings['hispeed'] = max(settings.get('hispeed', 1.0) - 0.2, 0.2)
-
-            # Process keyboard input using pynput for modifier keys
-            key_events = get_key_events() if (use_pynput and get_key_events) else []
-            for ev_type, k in key_events:
-                if ev_type != "press":
-                    continue
-                if not k:
-                    continue
-                # Clean up quotes if present (e.g. "'z'" -> "z")
-                if k.startswith("'") and k.endswith("'") and len(k) >= 3:
-                    k = k[1:-1]
-                
-                # Strip "Key." prefix if present (e.g. "Key.esc" -> "esc")
-                if k.startswith("Key."):
-                    k = k[4:]
-
-                # Modifier keys: stop playback using configurable mapping
-                mod_keys = settings.get('modifier_keys', {})
-                if k in mod_keys:
-                    if not auto_play:
-                        player.press_key(mod_keys[k])
-                    continue
+            renderer.render(
+                stdscr, player, current_time, events, event_index, initial_bpm, resolution, auto_play,
+                settings, key_names, lane_chars, quit_key_code, key_to_lane,
+                speedup_keycode, speeddown_keycode, use_pynput, get_key_events
+            )
             stdscr.refresh()
         except curses.error:
             pass
+
     return on_update
+

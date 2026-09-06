@@ -1,8 +1,11 @@
-# settings.toml – configuration for Shinonome Mini ver1.66+
+# settings.toml – configuration for Shinonome Mini ver1.71+
 
-#roots for simple browser
+#roots for bmsfd.py
 #ここをお持ちのbmsのpathに書き換えてください。
 allowed_roots = ["../tmp","../tmp2"]
+
+[display]
+mode = "mini" # "mini", "tiny", "none" (or "soundonly")
 
 [scratch]
 side="left" #"left" or "right"
@@ -124,6 +127,8 @@ solid_gauge = false  # SOLIDゲージ（初期値60%、クリア80%。ゲージ�
 # ロングノートの終端をノーツとして表示するか(Show end head of long notes)
 # 密度が高いとロングノートなのか連打なのか区別できなくなるので「終端非表示」のほうがよいです。
 show_ln_end_head = false
+show_result = true # 曲終了時にリザルト画面を表示するかどうか
+stdout_result = false # 曲終了時に標準出力にリザルト（統計情報）を出力するかどうか
 
 # quit key configuration
 [quit]
@@ -139,7 +144,7 @@ judgement_offset_ms = 0   # 判定タイミングのオフセット（ミリ秒�
 # CPUが貧弱な環境では sample_rate を下げる（例: 8000）と負荷が軽減されます。
 # モノラル（nchannels = 1）にすると更に負荷が下がりますが、音の定位が失われます。
 [audio]
-sample_rate = 24000   # サンプリングレート: 8000/12000/16000/22050/24000/32000/44100/48000 など
+sample_rate = 32000   # サンプリングレート: 8000/12000/16000/22050/24000/32000/44100/48000 など
 nchannels = 2         # チャンネル数: 1=モノラル, 2=ステレオ
 
 # BMSファイルテキスト読み込み設定

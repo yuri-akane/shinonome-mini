@@ -17,7 +17,8 @@ Python で実装された、ターミナル上で動作するシンプルな BMS
 - ALSA / PulseAudio 等、**miniaudio** が利用できるオーディオ環境
 - **pynput**（任意） – Shift / Ctrl / Alt キー判定のみに使用しています。
 - **numpy**（任意） – CPU負荷軽減のため、可能なら入れることをおすすめします。
-- その他標準ライブラリ (curses, json, re, os)
+- その他標準ライブラリ (curses, json, re, os, and select (or msvcrt))
+   - on Windows, pip install `windows-curses`.
 
 ## セットアップ手順
 ```bash
@@ -31,6 +32,7 @@ source venv/bin/activate
 # 3. 必要パッケージをインストール
 pip3 install miniaudio pynput numpy
 # pkg install python-numpy # termuxなど
+# pip install windows-curses # windows
 ```
 
 ## 実行例
@@ -39,12 +41,13 @@ python3 cnnm.py path/to/your_chart.bms
 ```
 - **Esc** キーで終了します。（設定で変更可）
 - 表示がおかしかったらterminalをfullscreenにしたりフォントサイズを小さくして調整してください。
+   - 調整不可能な環境の場合は--tiny（極小画面）をご使用ください。
 
 ## playlists
 ```bash
 python3 bmsfd.py
 ```
-- fdライクなプレイリストです。
+- fdライクなプレイリスト（曲選択画面）です。
 - 上下キー(またはk/j)でカーソル移動、enterで選択orプレイ、backspaceで親ディレクトリに戻る、escで終了です。
 - 「l」キーでサブディレクトリのbmsを全て一覧表示します。（量が多いと時間がかかります）もう一度押すとtoggleします。
 - 先にsettings.tomlでお持ちのbmsがあるフォルダをallowed_rootsに設定しておいてください。
@@ -74,8 +77,10 @@ Shinonome-Mini -- Minimal Console BMS Player
   Press [esc] to Quit
 ```
 
-## ゲーム画面例
-- 白鍵は[]、黒鍵は::、スクラッチはXX、ロングノートは | 、地雷は M! で表示されます。
+## ゲーム画面例(--mini)
+- 白鍵は[]、黒鍵は::、スクラッチはXX、ロングノートは | 、地雷は M! で表示されます。(5/7/10/14keys)
+   - 9/4/6keysはそれぞれ異なります。->9keys: () ^^ && >> OO << && ^^ ()
+   - constants.pyの変数を書き換えることでカスタマイズできます。
 ```
   Shinonome-Mini -- Minimal Console BMS Player
   Song: ^☆^ さくらなみこのかぜ ^☆^ / Artist: #ねここ14歳(obj:futher)
@@ -103,7 +108,61 @@ Shinonome-Mini -- Minimal Console BMS Player
 
     Press esc to quit playing
 ```
-## CLI options
+
+## リザルト画面例(--mini)
+```
+  +------------------------------------------------+
+  |                                                |
+  |            S T A G E   F A I L E D             |
+  |                                                |
+  |          ~  Failed (Gauge: 22.0%)  ~           |
+  |                                                |
+  |   ---  Results  ---                            |
+  |    PERFECT :     0                             |
+  |    GREAT   :     0                             |
+  |    GOOD    :     0                             |
+  |    BAD     :     0                             |
+  |    MISS    :     0                             |
+  |                                                |
+  |    EX SCORE :     0 /  1286                    |
+  |    MAX COMBO:     0                            |
+  |    MIN GAUGE:  22.0% / MAX GAUGE:  22.0%       |
+  |              Press [esc] to Quit               |
+  +------------------------------------------------+ 
+```
+
+## ゲーム画面例(--tiny)
+- 極小表示です。ノーツのみ、表示幅・高さも縮小(7鍵の場合8x8文字、一番下はゲージ)
+- 白鍵は「*」 黒鍵は「,」 スクラッチは「X」 ロングノートは「|」 地雷は「!（反転）」で表示されます。(5/7/10/14keys)
+   - 9/4/6keysはそれぞれ異なります。 -> 9keys: o ^ & > o < & ^ o
+   - constants.pyの変数を書き換えることでカスタマイズできます。
+
+```例：Heavenly Door (CHALLENGE : AIR Special)
+        |
+        |
+  * * * |
+     ,  |
+        |
+ X*     *
+  !!!!!!!
+ ==------
+```
+
+## リザルト画面例(--tiny)
+```
+  +------------------+
+  |      FAILED      |
+  |   GAUGE 22.0%    |
+  | P:   0  G:   0   |
+  | g:   0  B:   0   |
+  | M:   0           |
+  | EX:    0/1286    |
+  | MAX:   0         |
+  |    [esc] Quit    |
+  +------------------+
+```
+
+## cnnm.py CLI options
 ```
 --soundonly #画面なし、曲再生のみ
 --nomenu #settings.tomlの設定でゲーム開始
@@ -122,7 +181,9 @@ Shinonome-Mini -- Minimal Console BMS Player
 --mode=10k
 --mode=14k
 --mini #デフォルトの画面
-(--tiny #もっと小さい画面 (将来実装用))
+--tiny #極小画面
+--none # --soundonlyと同じ
+--help
 ```
 ## Notes & Caveats
 - UIはterminalだけです。グラフィカルUIはありません。
@@ -135,6 +196,7 @@ Shinonome-Mini -- Minimal Console BMS Player
    - 増加量も減少量も1/3(ゲージ70%時点)なので既存のゲームバランスを壊しません。
 - HARDゲージは「ゲージが0%に近いほど減少量が少ない」のに対して、SOLIDゲージは「ゲージが100%に近いほど増加量が少ない」です。
 - 増加量は通常の：{0%: 2/3, 50%: 1/2, 70%: 1/3, 80%: 1/4, 90%: 1/8, 95%: 1/16, 99%: 1/75}程度です。
+   - HARDと併用時はさらに0.1-0.2倍です。「初期値60%」です。
 - 減少量は、HARDと併用した場合にはそのまま、それ以外のモードでは通常の1/3（poor:-2%、EASYはさらに半分）です。
 
 ## 設定 (`settings.toml`)
@@ -154,8 +216,10 @@ Shinonome-Mini -- Minimal Console BMS Player
 - こちらのプロジェクト [shinonome](https://github.com/kuroclef/shinonome) の作者様に感謝を申し上げます。
 - 全く別物になっていますが、基本コンセプトをお借りしているので‑miniとさせていただきました。
 
-## あとでやる(ver2.50まで)
-- 画面表示オプション（--tiny: ノーツのみ、表示幅・高さも縮小）
+## あとでやる
+- ver2.50まで
+   - mixwaver-like
+   - マイナスBPM(?)
 
 ## minimalに保つためやらない
 - 画像・動画表示
@@ -163,25 +227,30 @@ Shinonome-Mini -- Minimal Console BMS Player
 - スコア記録・保存・送信、ファイル出力
 - IR等オンライン接続
 - ZZ（即死）地雷、不可視ノーツ、FREEZONE
-- マイナスBPM、負のSCROLL
+- マイナスBPM、負のSCROLL, gravity, reverse flow
    - 負のSCROLL（ノーツの逆流）は譜面によっては動作することを確認しています。
    - 私が十分な量の#SCROLL(bms)やscroll_event(bmson)を使ったbmsを持っていないので仮対応です。
 - midi対応
 - mp3は再生できますが音ズレがあるのでおすすめしません
 - preview
 - bmm, 774, n2s, gda, sm, osu等他の形式
+   - 16-17chを使用したダブルスクラッチやフットペダル
 - ロングノートは見た目だけです（キーを離した判定ができないため）。そのためLN,CN,HCNの区別もありません。
    - 押しっぱなしにすると次のノートでBADをとられる場合があるので少し早めに離してください。
 - ミュージックボックスを使う（昔の）bms
 - #WAVに絶対パスや親ディレクトリを指定したbms
 - #STP, #SPEED, #EXT, #SWITCH, etc
 - 18keys, 24keys, 48keys, etc
-
+- 1000小節以上のbms
+- half、スキン
+   - separateに対する5鍵のhalf表示。代わりにはならないかもしれませんが、"tiny"表示を使ってください。
+- SLOW/FAST表示
+   
 ## todoあとで確認
 - wav,bmp等がサブフォルダにわかれているbmsの動作確認
 - ロングノートの複雑な仕様の再確認（lnobj, lnmode, ln_type）
 - bmsonのときbpm確認（1ずれない？）
-- bmsonのとき実質無音ノーツになってる？
+- bmsonのとき実質無音ノーツになってる？（音切りされていないbmsonの仕様）
 - global変数使うな
 - *.pyが散らばってきたのでディレクトリ分ける
 - do more tests, do more bms.
@@ -202,5 +271,11 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.62 9keys(pms), #RANDOM手直し
 - 1.63 4keys/6keys
 - 1.64 cli options
-- 1.65 add playlists (bmsfd.py), fix 4keys/6keys ch
+- 1.65 曲選択画面としてplaylistsの追加 (bmsfd.py), fix 4keys/6keys ch
 - 1.66 rename main.py->cnnm.py, fix playlists with bmson, fix 4keys/6keys mirror/random
+- 1.67 bmsonの小節線命令仮対応
+- 1.68 画面が小さいときのcursesエラー緩和、--tinyオプション追加、remove deprecated typing(python 3.9+)、
+- 1.69 --soundonly時の動作改善（Ctrl+Cで強制終了するしかなかったのをEnterキーで終了するように修正）、windows対応の若干改善
+- 1.70 --tiny画面の改善（押したキーが反転表示でわかるように、ゲームオーバー表示をtinyに合わせて小さく）
+- 1.71 リザルト表示、リザルト標準出力、autoplayでゲージが増えるように、その他エラーハンドリング
+- 1.72 短いロングノートの振る舞いのデバグ（予定）

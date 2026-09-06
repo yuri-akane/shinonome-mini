@@ -65,6 +65,8 @@ def load_initial_settings(player, args=None):
         opt_solid = play_opts.get('solid_gauge', False)
         opt_show_measure_lines = play_opts.get('show_measure_lines', True)
         opt_show_ln_end_head = play_opts.get('show_ln_end_head', True)
+        opt_show_result = play_opts.get('show_result', False)
+        opt_stdout_result = play_opts.get('stdout_result', False)
         opt_hispeed = play_opts.get('hispeed', 1.0)
         opt_autoscratch = play_opts.get('auto_scratch', False)
 
@@ -94,14 +96,22 @@ def load_initial_settings(player, args=None):
         opt_hard = False
         opt_solid = False
         opt_show_measure_lines = True
+        opt_show_result = False
+        opt_stdout_result = False
         opt_hispeed = 1.0
         opt_scratch_side = "left"
         opt_autoscratch = False
         speedup_code = curses.KEY_UP
         speeddown_code = curses.KEY_DOWN
 
+    # Load display_mode setting from settings.toml and override with CLI args
+    from config import load_display_mode
+    opt_display_mode = load_display_mode()
+
     # CLIオプションによるオーバーライド（settings.tomlの値を上書き）
     if args is not None:
+        if getattr(args, 'cli_display_mode_set', False):
+            opt_display_mode = args.display_mode
         if getattr(args, 'autoplay', False):
             opt_autoplay = True
         if getattr(args, 'mirror', False):
@@ -116,6 +126,8 @@ def load_initial_settings(player, args=None):
             opt_solid = True
         if getattr(args, 'autoscratch', False):
             opt_autoscratch = True
+        if getattr(args, 'stats', False):
+            opt_stdout_result = True
         # --easy と --hard の排他処理
         if getattr(args, 'easy', False) and getattr(args, 'hard', False):
             # 両方指定された場合は hard を優先
@@ -141,8 +153,11 @@ def load_initial_settings(player, args=None):
         'opt_solid': opt_solid,
         'opt_show_measure_lines': opt_show_measure_lines,
         'opt_show_ln_end_head': opt_show_ln_end_head,
+        'opt_show_result': opt_show_result,
+        'opt_stdout_result': opt_stdout_result,
         'opt_hispeed': opt_hispeed,
         'opt_autoscratch': opt_autoscratch,
+        'opt_display_mode': opt_display_mode,
         'speedup_code': speedup_code,
         'speeddown_code': speeddown_code,
         'play_opts': play_opts,  # expose for later use

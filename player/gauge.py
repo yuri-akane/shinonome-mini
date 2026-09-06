@@ -1,5 +1,4 @@
-
-#gauge関係は将来的にすべてこのモジュールに移動する
+# player/gauge.py - ゲージ管理・追跡モジュール
 
 def _hard_gauge_loss(gauge, is_miss: bool) -> float:
     """HARDゲージのBAD/MISS時ゲージ減少量を計算する（負の値を返す）。
@@ -47,6 +46,27 @@ def _reset_gauge(solid_gauge, hard_mode):
         return 100.0
     else:
         return 22.0
+
+def init_gauge(player, solid_gauge: bool, hard_mode: bool):
+    """初期ゲージおよび min_gauge / max_gauge を初期化する"""
+    val = _reset_gauge(solid_gauge, hard_mode)
+    player.gauge = val
+    player.min_gauge = val
+    player.max_gauge = val
+    return val
+
+def update_gauge(player, new_gauge: float):
+    """ゲージ値を更新し、min_gauge および max_gauge を追跡・更新する"""
+    player.gauge = new_gauge
+    if not hasattr(player, 'min_gauge') or player.min_gauge is None:
+        player.min_gauge = new_gauge
+    else:
+        player.min_gauge = min(player.min_gauge, new_gauge)
+
+    if not hasattr(player, 'max_gauge') or player.max_gauge is None:
+        player.max_gauge = new_gauge
+    else:
+        player.max_gauge = max(player.max_gauge, new_gauge)
 
 def set_gauge_increment(inc, hard_mode):
     # モード別のゲージ増加倍率を決定

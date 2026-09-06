@@ -202,7 +202,7 @@ LANE_CHARS_10K = {
     6: "[]", 7: "::", 8: "[]", 9: "::", 10: "[]", 11: "XX"
 }
 LANE_CHARS_9K = {
-    0: "()", 1: "^^", 2: "&&", 3: ">>", 4: "XX",
+    0: "()", 1: "^^", 2: "&&", 3: ">>", 4: "OO",
     5: "<<", 6: "&&", 7: "^^", 8: "()"
 }
 LANE_CHARS_4K = {
@@ -240,6 +240,22 @@ KEY_NAMES_6K = [
     "[1]", "[2]", "[3]", "[4]", "[5]", "[6]"
 ]
 
+LANE_CHARS_TINY_LEFT = {
+    0: "X", 1: "*", 2: ",", 3: "*", 4: ",", 5: "*", 6: ",", 7: "*",
+    8: "*", 9: ",", 10: "*", 11: ",", 12: "*", 13: ",", 14: "*", 15: "X",
+}
+LANE_CHARS_TINY_RIGHT = {
+    0: "*", 1: ",", 2: "*", 3: ",", 4: "*", 5: ",", 6: "*", 7: "X",
+    8: "*", 9: ",", 10: "*", 11: ",", 12: "*", 13: ",", 14: "*", 15: "X",
+}
+LANE_CHARS_TINY_5K_LEFT = {0: "X", 1: "*", 2: ",", 3: "*", 4: ",", 5: "*"}
+LANE_CHARS_TINY_5K_RIGHT = {0: "*", 1: ",", 2: "*", 3: ",", 4: "*", 5: "X"}
+LANE_CHARS_TINY_10K = {0: "X", 1: "*", 2: ",", 3: "*", 4: ",", 5: "*", 6: "*", 7: ",", 8: "*", 9: ",", 10: "*", 11: "X"}
+LANE_CHARS_TINY_9K = {0: "o", 1: "^", 2: "&", 3: ">", 4: "o", 5: "<", 6: "&", 7: "^", 8: "o"}
+#LANE_CHARS_TINY_9K = {0: "W", 1: "Y", 2: "G", 3: "B", 4: "R", 5: "B", 6: "G", 7: "Y", 8: "W"} #char
+LANE_CHARS_TINY_4K = {0: "*", 1: ">", 2: "<", 3: "*"}
+LANE_CHARS_TINY_6K = {0: "*", 1: ",", 2: ">", 3: "<", 4: ",", 5: "*"}
+
 def get_channel_to_lane_map(mode: str, scratch_side: str = "left") -> dict:
     """キーモードとスクラッチ位置に応じた channel_to_lane マップを返す"""
     mode_upper = mode.upper()
@@ -258,9 +274,25 @@ def get_channel_to_lane_map(mode: str, scratch_side: str = "left") -> dict:
     else:  # 14K / DP
         return CHANNEL_TO_LANE_LEFT.copy()
 
-def get_lane_chars(mode: str, scratch_side: str = "left") -> dict:
-    """キーモードとスクラッチ位置に応じた lane_chars を返す"""
+def get_lane_chars(mode: str, scratch_side: str = "left", display_mode: str = "mini") -> dict:
+    """キーモード、スクラッチ位置、画面表示モードに応じた lane_chars を返す"""
     mode_upper = mode.upper()
+    if display_mode == "tiny":
+        if mode_upper == "4K":
+            return LANE_CHARS_TINY_4K
+        elif mode_upper == "6K":
+            return LANE_CHARS_TINY_6K
+        elif mode_upper == "9K":
+            return LANE_CHARS_TINY_9K
+        elif mode_upper == "5K":
+            return LANE_CHARS_TINY_5K_RIGHT if scratch_side == "right" else LANE_CHARS_TINY_5K_LEFT
+        elif mode_upper == "10K":
+            return LANE_CHARS_TINY_10K
+        elif mode_upper == "7K":
+            return LANE_CHARS_TINY_RIGHT if scratch_side == "right" else LANE_CHARS_TINY_LEFT
+        else:  # 14K
+            return LANE_CHARS_TINY_LEFT
+
     if mode_upper == "4K":
         return LANE_CHARS_4K
     elif mode_upper == "6K":

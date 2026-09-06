@@ -1,6 +1,6 @@
 import bisect
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Any
+from typing import Any
 
 @dataclass
 class TimelineSegment:
@@ -38,9 +38,9 @@ class BpmTimeline:
     """Utility to convert time (seconds) to beat position and cumulative visual height,
     handling BPM changes, measure multipliers, STOP events, and SCROLL speed factors.
     """
-    def __init__(self, initial_bpm: float, bpm_events: List[Tuple[float, float]], 
-                 stop_events: List[Tuple[float, float]], measures_multiplier: List[float],
-                 scroll_events: List[Tuple[float, float]] = None):
+    def __init__(self, initial_bpm: float, bpm_events: list[tuple[float, float]], 
+                 stop_events: list[tuple[float, float]], measures_multiplier: list[float],
+                 scroll_events: list[tuple[float, float]] = None):
         """Create timeline segments.
         initial_bpm: starting BPM.
         bpm_events: list of (beat, bpm).
@@ -62,7 +62,7 @@ class BpmTimeline:
             curr_beat += 4.0 * mult
         self.measure_beats[len(measures_multiplier)] = curr_beat
 
-        self.segments: List[TimelineSegment] = []
+        self.segments: list[TimelineSegment] = []
         self._build()
 
     def _get_measure_multiplier(self, beat: float) -> float:
@@ -184,7 +184,7 @@ class BpmTimeline:
         # Precompute start times for bisect lookup
         self._segment_start_times = [s.start_time for s in self.segments]
 
-    def get_state(self, time_sec: float) -> Tuple[float, float, float, float]:
+    def get_state(self, time_sec: float) -> tuple[float, float, float, float]:
         """Given current time in seconds, return:
         (beat, cumulative_height, current_bpm, current_multiplier)
         """
