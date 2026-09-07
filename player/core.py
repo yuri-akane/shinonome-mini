@@ -195,9 +195,8 @@ class Player:
         self.last_key_press_time[lane_index] = current_time
 
         # もし該当レーンでロングノートがアクティブ（押しっぱなし中）なら、リピート入力は無視する
-        #enbugのため一時的に除外
-        #if lane_index in self.active_lns:
-        #    return
+        if lane_index in self.active_lns:
+            return
 
         self.last_any_key_press_time = current_time
 
@@ -324,8 +323,12 @@ class Player:
                     update_gauge(self, max(0.0, self.gauge - (4.0 * self.loss_factor)))
 
             # ロングノートの始点ノーツを正しく叩けた場合、アクティブにする
+            # ただし、超短LNでplayループが終端を先に処理済み（state=1）にしていた場合は
+            # active_lnsに登録しない。登録するとlane_indexが永遠にクリアされずキーロックになる。
             if is_hit and best_event.get('ln_state') == 'start':
-                self.active_lns[lane_index] = best_event
+                partner = best_event.get('ln_partner')
+                if partner is None or partner.get('state', 0) == 0:
+                    self.active_lns[lane_index] = best_event
 
             self.max_combo = max(self.max_combo, self.combo)
             self.judgement_time = current_time

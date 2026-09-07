@@ -48,6 +48,7 @@ python3 cnnm.py path/to/your_chart.bms
 python3 bmsfd.py
 ```
 - fdライクなプレイリスト（曲選択画面）です。
+   - 他のモジュールからは独立しています。cnnm.py以外の他のbmsビューア・プレイヤーも引数で呼べるようにする予定です。
 - 上下キー(またはk/j)でカーソル移動、enterで選択orプレイ、backspaceで親ディレクトリに戻る、escで終了です。
 - 「l」キーでサブディレクトリのbmsを全て一覧表示します。（量が多いと時間がかかります）もう一度押すとtoggleします。
 - 先にsettings.tomlでお持ちのbmsがあるフォルダをallowed_rootsに設定しておいてください。
@@ -217,6 +218,8 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 全く別物になっていますが、基本コンセプトをお借りしているので‑miniとさせていただきました。
 
 ## あとでやる
+- ver2.00まで
+   - cnnm.py以外の他のbmsビューア・プレイヤーも引数で呼べるようにする
 - ver2.50まで
    - mixwaver-like
    - マイナスBPM(?)
@@ -278,4 +281,5 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.69 --soundonly時の動作改善（Ctrl+Cで強制終了するしかなかったのをEnterキーで終了するように修正）、windows対応の若干改善
 - 1.70 --tiny画面の改善（押したキーが反転表示でわかるように、ゲームオーバー表示をtinyに合わせて小さく）
 - 1.71 リザルト表示、リザルト標準出力、autoplayでゲージが増えるように、その他エラーハンドリング
-- 1.72 短いロングノートの振る舞いのデバグ（予定）
+- 1.72 短いロングノートの振る舞いのデバグ
+- 1.73 ゲージが十分にあってもfailedになる場合があるのを修正（予定）

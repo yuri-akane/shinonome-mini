@@ -47,6 +47,7 @@ python3 cnnm.py path/to/your_chart.bms
 python3 bmsfd.py
 ```
 - fd-like playlist(music select).
+   - independent from other modules. (future support:) can call other bms viewers and players.
 - key_up/k: move up, key_down/j: move down, enter: select dir or play bms, backspace: back to parent dir, esc: exit
 - "l": list all bms of subdir recursively. (may cause long time wait...）toggle for default view.
 - Configure settings.toml and set your bms folders to "allowed_roots".
@@ -216,6 +217,8 @@ normal gauge.
 - Although this is a completely different project, it borrows the core concept, hence the "-mini" suffix.
 
 ## future support
+- to ver2.00
+   - implement bmsfd.py to be able to call other viewers and players
 - to ver2.50
    - mixwaver-like
    - minus BPM?
@@ -275,4 +278,5 @@ normal gauge.
 - 1.69 improve --soundonly handling at exit (Ctrl+C(force exit) to Enter key), and improve windows support
 - 1.70 improve --tiny window(key press) and handling at result(gameover)
 - 1.71 result window, result stdout, gauge increment at autoplay, other error handlings
-- 1.72 debug short longnote behavior(todo)
+- 1.72 debug short longnote behavior
+- 1.73 ゲージが十分にあってもfailedになる場合があるのを修正（予定）

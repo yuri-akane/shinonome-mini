@@ -12,10 +12,43 @@ or a virtual root that lists all allowed roots if none are specified.
 
 import curses
 from pathlib import Path
+import re
 import sys
 import subprocess
+import unicodedata
 import json
 from collections import defaultdict
+
+# ---------------------------------------------------------------------------
+# Suspicious Unicode character detection
+# (mirrors the pattern defined in audio/resolve_audio_path.py)
+# ---------------------------------------------------------------------------
+# Characters that have no legitimate use in a file path or display string and
+# could be used to confuse the terminal or obscure malicious content:
+#   - ASCII control characters (U+0000–U+001F) and DEL (U+007F)
+#   - Zero‑width characters: ZWSP, ZWNJ, ZWJ, LRM, RLM (U+200B–U+200F)
+#   - Bidirectional control characters: LRE, RLE, PDF, LRO, RLO (U+202A–U+202E)
+#   - Bidirectional isolate characters: LRI, RLI, FSI, PDI (U+2066–U+2069)
+#   - BOM / Zero Width No‑Break Space (U+FEFF)
+_SUSPICIOUS_UNICODE_RE = re.compile(
+    r'[\x00-\x1f'      # ASCII制御文字 (NUL〜US)
+    r'\x7f'             # DEL
+    r'\u200b-\u200f'    # ゼロ幅文字 (ZWSP, ZWNJ, ZWJ, LRM, RLM)
+    r'\u202a-\u202e'    # 方向性制御文字 (LRE, RLE, PDF, LRO, RLO)
+    r'\u2066-\u2069'    # 方向性分離文字 (LRI, RLI, FSI, PDI)
+    r'\ufeff'           # BOM / ZWNBSP
+    r']'
+)
+
+
+def has_suspicious_chars(s: str) -> bool:
+    """Return True if *s* contains suspicious Unicode characters."""
+    return bool(_SUSPICIOUS_UNICODE_RE.search(s))
+
+
+def sanitize_display_string(s: str) -> str:
+    """Strip suspicious Unicode characters from *s* for safe curses display."""
+    return _SUSPICIOUS_UNICODE_RE.sub('', s)
 
 # Supported song file extensions (case‑insensitive)
 SUPPORTED_EXTENSIONS = {".bms", ".bme", ".bml", ".pms", ".bmson"}
@@ -158,6 +191,11 @@ def open_file_with_cnnm(stdscr, path: Path) -> curses.window:
     """
     if not path.exists() or not path.is_file():
         return stdscr
+    # Reject paths containing suspicious Unicode characters (control chars,
+    # zero‑width spaces, bidirectional controls, BOM) that could confuse the
+    # terminal or obscure malicious filenames.
+    if has_suspicious_chars(str(path)):
+        return stdscr
     # End curses so that cnnm can take over the terminal
     curses.endwin()
     try:
@@ -180,6 +218,54 @@ def collect_bms_files(root: Path) -> list[Path]:
     )
 
 # ----------------------------------------------------------------------
+def navigate_up(
+    current_path: Path,
+    current_selected: int,
+    last_selected: dict[Path, int],
+    allowed_roots: set[Path],
+) -> tuple[Path, int, int, None, None]:
+    """
+    Navigate to the parent directory, respecting allowed_roots.
+    Mutates *last_selected* to save the current cursor position before moving.
+    Returns (path, selected, offset, preview_lines, preview_file).
+    """
+    last_selected[current_path] = current_selected
+    new_path = current_path.parent
+    if is_allowed(new_path, allowed_roots):
+        return new_path, last_selected.get(new_path, 0), 0, None, None
+    # Parent is outside allowed roots → fall back to the virtual root.
+    return Path("/"), 0, 0, None, None
+
+
+# ----------------------------------------------------------------------
+def build_entries(
+    path: Path,
+    allowed_roots: set[Path],
+) -> tuple[list[Path], str | None]:
+    """
+    Build the list of directory entries to display for *path*.
+    Returns (entries, error_msg). *error_msg* is None on success.
+    The virtual root (Path("/")) returns the allowed roots as top-level entries.
+    """
+    if path == Path("/"):
+        return sorted(allowed_roots, key=lambda p: p.name.lower()), None
+    try:
+        raw_entries = [
+            p for p in path.iterdir()
+            if p.is_dir() or p.suffix.lower() in SUPPORTED_EXTENSIONS
+        ]
+    except (FileNotFoundError, PermissionError):
+        return [Path("..")], f"Error: Cannot access directory ({path})"
+    for p in raw_entries:
+        if not p.is_dir():
+            _ = file_props[p]  # populate placeholder properties (no-op yet)
+    return (
+        [Path("..")] + sorted(raw_entries, key=lambda p: (not p.is_dir(), p.name.lower())),
+        None,
+    )
+
+
+# ----------------------------------------------------------------------
 def main(stdscr):
     # --------------------------------------------------------------
     # 1. Initialise state
@@ -198,9 +284,21 @@ def main(stdscr):
     # Determine initial path: if a command‑line argument is given, use it;
     # otherwise show a virtual root that lists all allowed roots.
     if len(sys.argv) > 1:
-        path = Path(sys.argv[1]).expanduser().resolve()
-        if not path.exists() or not path.is_dir():
+        arg = sys.argv[1]
+        if has_suspicious_chars(arg):
+            # Reject command‑line arguments containing suspicious Unicode chars.
             path = Path("/")
+        else:
+            path = Path(arg).expanduser().resolve()
+            if not path.exists() or not path.is_dir():
+                path = Path("/")
+            elif allowed_roots and not is_allowed(path, allowed_roots):
+                # The given path is outside every configured allowed root,
+                # but the user explicitly specified it on the command line.
+                # Add it to allowed_roots for this session so navigation
+                # within the directory works normally (Enter / Backspace etc.)
+                # while the rest of the filesystem remains restricted.
+                allowed_roots.add(path)
     else:
         # Use a sentinel Path("/") to represent the virtual root
         path = Path("/")
@@ -289,29 +387,9 @@ def main(stdscr):
             # In list mode we show the recursive BMS file list
             entries = bms_list or []
         else:
-            if path == Path("/"):
-                # Virtual root: show all allowed roots as entries
-                raw_entries = sorted(allowed_roots, key=lambda p: p.name.lower())
-                entries = [p for p in raw_entries]
-            else:
-                try:
-                    raw_entries = [
-                        p for p in path.iterdir()
-                        if p.is_dir() or p.suffix.lower() in SUPPORTED_EXTENSIONS
-                    ]
-                except (FileNotFoundError, PermissionError):
-                    raw_entries = []
-                    status_msg = f"Error: Cannot access directory ({path})"
-
-                # Populate placeholder properties for each file (no‑op yet)
-                for p in raw_entries:
-                    if not p.is_dir():
-                        _ = file_props[p]  # creates the default dict entry
-
-                entries = [Path("..")] + sorted(
-                    raw_entries,
-                    key=lambda p: (not p.is_dir(), p.name.lower())
-                )
+            entries, err = build_entries(path, allowed_roots)
+            if err:
+                status_msg = err
 
         # Ensure selected index is within bounds after entries are known
         if selected >= len(entries):
@@ -414,22 +492,9 @@ def main(stdscr):
                 else:
                     if chosen.name == "..":
                         status_msg = None
-                        # Store current selection before moving up
-                        last_selected[path] = selected
-                        new_path = path.parent
-                        if is_allowed(new_path, allowed_roots):
-                            path = new_path
-                            selected = last_selected.get(path, 0)
-                            offset = 0
-                            preview_lines = None
-                            preview_file = None
-                        else:
-                            # Cannot move up; show virtual root instead
-                            path = Path("/")
-                            selected = 0
-                            offset = 0
-                            preview_lines = None
-                            preview_file = None
+                        path, selected, offset, preview_lines, preview_file = navigate_up(
+                            path, selected, last_selected, allowed_roots
+                        )
                     else:
                         new_path = path / chosen
                         if not new_path.exists():
@@ -450,22 +515,9 @@ def main(stdscr):
             elif key in (curses.KEY_BACKSPACE, 127):
                 status_msg = None
                 if path != Path("/"):
-                    # same as selecting ".."
-                    last_selected[path] = selected
-                    new_path = path.parent
-                    if is_allowed(new_path, allowed_roots):
-                        path = new_path
-                        selected = last_selected.get(path, 0)
-                        offset = 0
-                        preview_lines = None
-                        preview_file = None
-                    else:
-                        # Cannot move up; show virtual root instead
-                        path = Path("/")
-                        selected = 0
-                        offset = 0
-                        preview_lines = None
-                        preview_file = None
+                    path, selected, offset, preview_lines, preview_file = navigate_up(
+                        path, selected, last_selected, allowed_roots
+                    )
             elif key == ord('l'):
                 if path != Path("/"):
                     # Enter list mode: build recursive BMS file list for current directory
@@ -478,33 +530,17 @@ def main(stdscr):
         # ------------------------------------------------------------------
         # Rebuild entries if the directory changed during key handling
         # ------------------------------------------------------------------
-        if path != old_path:
-            if list_mode:
-                # In list mode we keep the same bms_list; no rebuild needed
-                pass
-            else:
-                if path == Path("/"):
-                    raw_entries = sorted(allowed_roots, key=lambda p: p.name.lower())
-                    entries = [p for p in raw_entries]
-                else:
-                    raw_entries = [
-                        p for p in path.iterdir()
-                        if p.is_dir() or p.suffix.lower() in SUPPORTED_EXTENSIONS
-                    ]
-                    for p in raw_entries:
-                        if not p.is_dir():
-                            _ = file_props[p]
-                    entries = [Path("..")] + sorted(
-                        raw_entries,
-                        key=lambda p: (not p.is_dir(), p.name.lower())
-                    )
-                # Adjust selection and offset to stay within bounds
-                if selected >= len(entries):
-                    selected = max(0, len(entries) - 1)
-                if offset > selected:
-                    offset = selected
-                elif selected >= offset + max_entry_rows:
-                    offset = selected - max_entry_rows + 1
+        if path != old_path and not list_mode:
+            entries, err = build_entries(path, allowed_roots)
+            if err:
+                status_msg = err
+            # Adjust selection and offset to stay within bounds
+            if selected >= len(entries):
+                selected = max(0, len(entries) - 1)
+            if offset > selected:
+                offset = selected
+            elif selected >= offset + max_entry_rows:
+                offset = selected - max_entry_rows + 1
 
         # ------------------------------------------------------------------
         # Update preview automatically when the cursor moves onto a file or directory
@@ -522,7 +558,11 @@ def main(stdscr):
                         for key in order:
                             val = props.get(key, "")
                             if val:
-                                preview_lines.append(f"{key.title()}: {val}")
+                                # Strip suspicious chars (control chars, BiDi,
+                                # zero‑width spaces, BOM) before display.
+                                preview_lines.append(
+                                    f"{key.title()}: {sanitize_display_string(val)}"
+                                )
                             else:
                                 preview_lines.append("")
                     except Exception:
@@ -547,7 +587,10 @@ def main(stdscr):
                     for key in order:
                         val = props.get(key, "")
                         if val:
-                            preview_lines.append(f"{key.title()}: {val}")
+                            # Strip suspicious chars before display.
+                            preview_lines.append(
+                                f"{key.title()}: {sanitize_display_string(val)}"
+                            )
                         else:
                             preview_lines.append("")
                 except Exception:

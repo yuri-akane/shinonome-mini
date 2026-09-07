@@ -1,4 +1,4 @@
-# settings.toml – configuration for Shinonome Mini ver1.71+
+# settings.toml – configuration for Shinonome Mini ver1.72+
 
 #roots for bmsfd.py
 #ここをお持ちのbmsのpathに書き換えてください。
@@ -144,7 +144,7 @@ judgement_offset_ms = 0   # 判定タイミングのオフセット（ミリ秒�
 # CPUが貧弱な環境では sample_rate を下げる（例: 8000）と負荷が軽減されます。
 # モノラル（nchannels = 1）にすると更に負荷が下がりますが、音の定位が失われます。
 [audio]
-sample_rate = 32000   # サンプリングレート: 8000/12000/16000/22050/24000/32000/44100/48000 など
+sample_rate = 24000   # サンプリングレート: 8000/12000/16000/22050/24000/32000/44100/48000 など
 nchannels = 2         # チャンネル数: 1=モノラル, 2=ステレオ
 
 # BMSファイルテキスト読み込み設定
