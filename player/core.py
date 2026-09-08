@@ -395,7 +395,7 @@ class Player:
 
             # 全イベントが処理済みになったかチェック (O(1) 最適化)
             # 最後のイベントの時刻に達するまでは絶対に全処理完了にはならない
-            if current_time >= last_event_time:
+            if current_time > last_event_time + 2: #lasteventですぐに終了画面にしない、2秒待つ
                 if event_index >= len(events):
                     all_processed = True
                 else:
@@ -533,6 +533,7 @@ class Player:
 
             # 終了条件：全イベントが処理され、かつ再生中の音がすべて消えた
             if all_processed and len(self.audio.active_sounds) == 0:
+                time.sleep(0.005)
                 self.is_playing = False
                 break
 

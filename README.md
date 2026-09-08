@@ -46,14 +46,14 @@ python3 cnnm.py path/to/your_chart.bms
 ```bash
 python3 bmsfd.py
 ```
-- fd-like playlist(music select).
-   - independent from other modules. (future support:) can call other bms viewers and players.
+- fd-like playlist (music selection).
+   - independent of other modules. (future support:) it will be possible to launch other BMS viewers and players from here.
 - key_up/k: move up, key_down/j: move down, enter: select dir or play bms, backspace: back to parent dir, esc: exit
-- "l": list all bms of subdir recursively. (may cause long time wait...）toggle for default view.
+- "l": list all bms of subdir recursively. (this may take a long time）. toggle for default view.
 - Configure settings.toml and set your bms folders to "allowed_roots".
 
 ## menu window (example)
-- press key to toggle option, and Enter key to start.
+- press a key to toggle an option, and press Enter to start.
 ```
 Shinonome-Mini -- Minimal Console BMS Player
   Song: ^☆^ さくらなみこのかぜ ^☆^ / Artist: #ねここ14歳(obj:futher)
@@ -279,4 +279,4 @@ normal gauge.
 - 1.70 improve --tiny window(key press) and handling at result(gameover)
 - 1.71 result window, result stdout, gauge increment at autoplay, other error handlings
 - 1.72 debug short longnote behavior
-- 1.73 ゲージが十分にあってもfailedになる場合があるのを修正（予定）
+- 1.73 debug failed with enough gauge
