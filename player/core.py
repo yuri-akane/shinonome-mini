@@ -2,8 +2,7 @@ import time
 import os
 from parser.bmsparser import BmsParser
 from parser.bmsonparser import BmsonParser
-import config
-from timing import estimated_total
+from helpers.total import estimated_total
 from player.gauge import (
     _hard_gauge_loss,
     _solid_gauge_gain_factor,
@@ -28,12 +27,29 @@ class Player:
         self.hard_mode = False
         self.solid_gauge = False
         self.current_scroll = 1.0
+        self.active_key_lanes = None
         
         # ゲージ・スコア・統計情報
         self.total_playable_notes = 0  # 総プレイノーツ数
         self.last_any_key_press_time = 0.0
         self.reset_stats() #その他コンボ数・misscount等
         
+    # キー音として扱われうるチャンネル番号の範囲 (10進数で判断)
+    _KEY_CHANNEL_RANGES = (
+        (11, 29),  # 1P/2P 通常ノーツ (11-19, 21-29)
+        (51, 69),  # 1P/2P ロングノーツ (51-59, 61-69)
+    )
+
+    @staticmethod
+    def _is_key_channel(channel: str) -> bool:
+        """BMSのキー音チャンネル（通常 or LN）かどうかを判定する。
+        16進表記のチャンネルは対象外（制御系・地雷等）。
+        """
+        if not channel.isdigit():
+            return False
+        n = int(channel)
+        return (11 <= n <= 29) or (51 <= n <= 69)
+
     def _init_event_state(self):
         """Initialize event flags and count playable notes.
         Called after loading a chart to separate concerns from the playback loop.
@@ -44,9 +60,22 @@ class Player:
             channel = event.get('channel', '01')
             if event.get('is_mine'):
                 event['is_playable'] = False
+                event['is_bgm_overflow'] = False
                 event['state'] = 0
                 continue
-            event['is_playable'] = (channel in self.channel_to_lane) or (channel.isdigit() and 51 <= int(channel) <= 69)
+            lane_idx = self.channel_to_lane.get(channel)
+            in_lane = (lane_idx is not None)
+            if hasattr(self, 'active_key_lanes') and self.active_key_lanes is not None:
+                in_lane = in_lane and (lane_idx in self.active_key_lanes)
+            # --mode 強制時などでレーンに割り当てられていないキー音チャンネルを
+            # BGM オーバーフロー（自動再生・判定対象外）として扱う
+            is_overflow = (
+                not in_lane
+                and channel not in ('01', 'measure_line')
+                and self._is_key_channel(channel)
+            )
+            event['is_playable'] = in_lane
+            event['is_bgm_overflow'] = is_overflow
             event['state'] = 0  # 0: PENDING, 1: HIT (or BGM processed), 2: MISS
             if event['is_playable']:
                 if event.get('ln_state') == 'end':
@@ -78,6 +107,12 @@ class Player:
 
         try:
             self.chart = parser.parse(file_path)
+            if self.chart and 'info' in self.chart:
+                from helpers.sanitizer import sanitize_display_string
+                for key in ('title', 'artist', 'subtitle', 'subartist', 'genre'):
+                    val = self.chart['info'].get(key)
+                    if isinstance(val, str):
+                        self.chart['info'][key] = sanitize_display_string(val)
             # After parsing, store the initial BPM for reference and speed scaling
             self.initial_bpm = self.chart['info']['bpm']
             self.current_bpm = self.initial_bpm  # current BPM starts as initial
@@ -118,7 +153,7 @@ class Player:
     def get_current_time(self):
         if not self.is_playing:
             return 0
-        return time.perf_counter() - self.start_time
+        return self.audio.get_audio_time()
 
     def get_judgement_windows(self):
         """#RANK命令とEASYオプションに基づき、判定窓（秒）を取得する"""
@@ -217,21 +252,22 @@ class Player:
         if not playable_events:
             return # 叩けるノーツがない
 
-        # 最も現在の時間に近いノーツを探す
+        # 判定窓およびオフセットの取得
+        perf_w, great_w, good_w, bad_w = self.get_judgement_windows()
+        offset_seconds = getattr(self, 'judgement_offset_ms', 0) / 1000.0
+
+        # 最も現在の判定タイミングに近いノーツを探す（判定オフセット反映済み時刻で比較）
         best_event = None
         min_diff = 999.0
 
         for event in playable_events:
-            diff = abs(event['time'] - current_time)
+            target_time = event['time'] + offset_seconds
+            diff = abs(target_time - current_time)
             if diff < min_diff:
                 min_diff = diff
                 best_event = event
 
-        # 判定窓の取得
-        perf_w, great_w, good_w, bad_w = self.get_judgement_windows()
-        # タイミングの調整値を反映 (settings.tomlのタイミングオフセット)
-        offset_seconds = getattr(self, 'judgement_offset_ms', 0) / 1000.0
-        adjusted_diff = abs(best_event['time'] + offset_seconds - current_time) if best_event else min_diff
+        adjusted_diff = min_diff if best_event else 999.0
 
         # まず通常ノーツを優先判定。BAD判定窓内の通常ノーツがない場合のみ地雷ノーツをチェックする。
         if not (best_event and adjusted_diff <= bad_w):
@@ -250,6 +286,7 @@ class Player:
                     mine_events.sort(key=lambda x: x[0])
                     target_mine = mine_events[0][1]
                     target_mine['state'] = 1  # 踏んだ状態にする
+                    target_mine['manual_hit'] = True
                     
                     # 爆発音の再生 (sound_id または '#WAV00')
                     sound_to_play = target_mine.get('sound_id') or '00'
@@ -274,6 +311,7 @@ class Player:
         # 判定窓（BAD以内）ならHIT (通常ノーツ)
         if best_event and adjusted_diff <= bad_w:
             best_event['state'] = 1 # HIT状態にする
+            best_event['manual_hit'] = True
             if best_event.get('sound_id'):
                 limit = self._get_polyphony_limit(best_event['sound_id'])
                 self.audio.play(best_event['sound_id'], limit)
@@ -371,6 +409,7 @@ class Player:
         # Prepare event flags and count playable notes
         self._init_event_state()
 
+        self.audio.reset_clock()
         self.start_time = time.perf_counter()
         event_index = 0
         miss_check_index = 0  # 見逃しMISS判定専用インデックス（event_indexとは独立して管理）
@@ -411,16 +450,15 @@ class Player:
                 # Both control events and audio triggers must wait until their target time is reached
                 if current_time >= target_seconds:
                     # Process control events (BPM or measure changes)
-                    from control import process_control_event
-                    #old_bpm = self.current_bpm #使ってない変数？
-                    #old_mult = getattr(self, 'current_measure_multiplier', 1.0) #使ってない変数？
+                    from player.control import process_control_event
                     if process_control_event(self, event, auto_play):
                         event['state'] = 1
                         event_index += 1
                         continue
 
-                    if event['channel'] == '01':
-                        # Always play BGM regardless of is_playable or auto_play
+                    if event['channel'] == '01' or event.get('is_bgm_overflow'):
+                        # Always play BGM regardless of is_playable or auto_play.
+                        # is_bgm_overflow は --mode 強制時に溢れたキー音 (例: 9K→5K時の22-25ch) を指す。
                         if event.get('sound_id'):
                             limit = self._get_polyphony_limit(event['sound_id'])
                             self.audio.play(event['sound_id'], limit)
@@ -448,12 +486,9 @@ class Player:
                             if event.get('sound_id'):
                                 limit = self._get_polyphony_limit(event['sound_id'])
                                 self.audio.play(event['sound_id'], limit)
-                            #event['state'] = 1
                             # ------------------------------------------------------------------
-                            # Auto‑play gauge handling – treat every non‑scratch note as a PERFECT hit. <- ?
+                            # Auto‑play gauge handling – treat every non‑scratch note as a PERFECT hit.
                             # ------------------------------------------------------------------
-                            #if not is_scratch:
-                            # Increment gauge as if the player had hit it perfectly.
                             inc = self.perf_gauge_inc
                             if self.solid_gauge:
                                 inc *= _solid_gauge_gain_factor(self.gauge)
@@ -481,8 +516,12 @@ class Player:
             if not auto_play:
                 perf_w, great_w, good_w, bad_w = self.get_judgement_windows()
                 offset_seconds = getattr(self, 'judgement_offset_ms', 0) / 1000.0
-                # 先頭の処理済みイベントをスキップしてインデックスを詰める
-                while miss_check_index < len(events) and events[miss_check_index].get('state', 0) != 0:
+                # 先頭の処理済みイベント（または BGM overflow）をスキップしてインデックスを詰める
+                # is_bgm_overflow ノーツは state=0 のまま残り得るため、ここでもスキップする
+                while miss_check_index < len(events) and (
+                    events[miss_check_index].get('state', 0) != 0
+                    or events[miss_check_index].get('is_bgm_overflow')
+                ):
                     miss_check_index += 1
                 for event in events[miss_check_index:]:
                     target_seconds = event['time']
@@ -490,7 +529,7 @@ class Player:
                     if (target_seconds + offset_seconds) - current_time > bad_w:
                         break
 
-                    if event['state'] == 0 and event['is_playable']:
+                    if event['state'] == 0 and event['is_playable'] and not event.get('is_bgm_overflow'):
                         # オートスクラッチが有効な場合、スクラッチノーツは見逃しMISS判定から除外する
                         if self.auto_scratch:
                             ch = event.get('channel')

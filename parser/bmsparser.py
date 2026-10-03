@@ -4,12 +4,12 @@ import re
 
 from typing import Any
 from constants import CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT, get_channel_to_lane_map
-from timing import estimated_total
+from helpers.total import estimated_total
 from player.mine import is_mine_channel, decode_mine_damage, decode_mine_damage_numeric
 from parser.mode_detector import detect_mode_from_bms
 from parser.util import get_event_priority, filter_duplicate_01_events, build_timeline, calculate_event_times, resolve_ln_partners
 
-from config import load_bms_encoding
+from helpers.options import load_options
 
 class BmsParser:
     """Parse BMS files into a structured chart representation.
@@ -223,6 +223,11 @@ class BmsParser:
                 info['rank'] = int(val)
             except Exception:
                 pass
+        elif key_upper == "TOTAL":
+            try:
+                info['total'] = float(val)
+            except Exception:
+                pass
         elif key_upper == "LNOBJ":
             info['lnobj'] = clean_id(val)
         elif key_upper == "LNTYPE":
@@ -278,7 +283,7 @@ class BmsParser:
             raise FileNotFoundError(f"BMS file not found: {file_path}")
 
         if encoding is None:
-            encoding = load_bms_encoding()
+            encoding = load_options().bms_encoding
 
         info = {
             'title': '',

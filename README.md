@@ -1,13 +1,13 @@
 # Shinonome Mini – A minimal console BMS player
 
 A minimal console BMS player written in Python. It runs in a terminal using `curses` and plays audio via **miniaudio**.
+- Minimal dependencies – **miniaudio** for sound playback and optional **pynput** and **numpy**
 
 ## Features
 - Supports **bms / bmson**
 - Supports **SP(5,7keys), DP(10,14keys), and 9,4,6keys**
 - Supports **AUTO PLAY / MIRROR / RANDOM / EASY / HARD** options
 - Simple configuration through `settings.toml`
-- Minimal dependencies – **miniaudio** for sound playback and optional **pynput** and **numpy**
 - No network connections, No output files
 - "SOLID" gauge option: init 60%, but more harder gauge
 
@@ -47,10 +47,12 @@ python3 cnnm.py path/to/your_chart.bms
 python3 bmsfd.py
 ```
 - fd-like playlist (music selection).
-   - independent of other modules. (future support:) it will be possible to launch other BMS viewers and players from here.
 - key_up/k: move up, key_down/j: move down, enter: select dir or play bms, backspace: back to parent dir, esc: exit
 - "l": list all bms of subdir recursively. (this may take a long time）. toggle for default view.
+- "F7": advanced mode (options not often used)
 - Configure settings.toml and set your bms folders to "allowed_roots".
+- independent of other modules.
+   - other bms viewers and players can be launched (also configure settings.toml).
 
 ## menu window (example)
 - press a key to toggle an option, and press Enter to start.
@@ -165,14 +167,14 @@ Shinonome-Mini -- Minimal Console BMS Player
 ```
 --soundonly #no display, music only
 --nomenu #game start with default settings(settings.toml)
---random, -r
---mirror, -m
---easy, -e
---hard, -h
---auto, -a
---autoscratch, -s
---solid
---mode=4k #force game mode
+--random, -r [on|off]
+--mirror, -m [on|off]
+--easy, -e [on|off]
+--hard, -h [on|off]
+--auto, -a [on|off]
+--autoscratch, -s [on|off]
+--solid [on|off]
+--mode=4k #force game mode, alias:--mode-hint 
 --mode=5k
 --mode=6k
 --mode=7k
@@ -183,6 +185,10 @@ Shinonome-Mini -- Minimal Console BMS Player
 --tiny #extreme tiny display
 --none # alias --soundonly
 --help
+--show-result [on|off]
+--stats [on|off]
+--mw # Mixwaver Mode
+--scan # alias --mw
 ```
 ## Notes & Caveats
 - The UI is terminal‑only; no graphical interface.
@@ -218,9 +224,9 @@ normal gauge.
 
 ## future support
 - to ver2.00
-   - implement bmsfd.py to be able to call other viewers and players
+   - implement bmsfd.py to be able to call other viewers and players(ok?)
 - to ver2.50
-   - mixwaver-like
+   - mixwaver-mode(ok?)
    - minus BPM?
 
 ## this program doesn't support:
@@ -236,27 +242,30 @@ normal gauge.
 - preview
 - bmm, 774, n2s, gda, sm, osu and other formats
    - double scratch or foot pedal with each 16-17ch
-- Full long‑note support (LN,CN,HCN...sorry i can't...)
+- #LNMODE x, #MGQ
+  - cannot support Full long‑note (LN,CN,HCN) because of wayland "onrelease" behavior.
 - musicbox (old bms)
 - #WAVxx as absolute path or parent directory
-- #STP, #SPEED, #EXT, #SWITCH, etc
+- #STP, #SPEED, #EXT, #SWITCH, %URL, %mail, #EXBPM, #BASEBPM, etc
 - 18keys, 24keys, 48keys, etc
-- more 1000+ measures
+- bms that has 1000+ measures, bms that needs more 1+ day to play
 - half、skins
    - 5keys "half" against 7keys "separate". use "tiny" display option instead.
 - show SLOW/FAST
+- "white/green number"
+- constant/max/min hispeed
+- 再生自体の加速
+- 空打ちPOOR（とりあえずありません）
 
 ## TODO (to be verified later)
 - Verify bms support that resources (wav, bmp) are divided into subfolders
-- Verify longnote support（lnobj, lnmode, ln_type...too complicated）
 - Verify BPM alignment when using bmson (ensure no "-1" bpm offset).
+   - espacially, wav/mp3 over 1min (bmson)
 - Check that bmson charts do not produce silent notes. (about bmson that doesnot cut WAVs.)
-- do not use global variable
-- split modules for refactor
 - do more tests, do more bms.
 
 ## changelog
-- ver1.50 basic bms command to play (bpm change, score length change, stop, longnote or so)
+- ver1.50 basic bms command to play (bpm change, score length change, stop, longnote(type1,2,lnobj) or so)
 - 1.53a #BASE (36, 62)
 - 1.53a do not playback many-time with single #WAVxx definition
    - "polyphony" section @ bmson
@@ -280,3 +289,10 @@ normal gauge.
 - 1.71 result window, result stdout, gauge increment at autoplay, other error handlings
 - 1.72 debug short longnote behavior
 - 1.73 debug failed with enough gauge
+- 1.74 experimental MixWaver Mode
+- 1.75 verify channel mappings for forced --mode
+- 1.76 refactor options, enter to exit at result window
+- 1.77 external viewer via bmsfd.py, debug reading #total
+- 1.78 advanced menu(F7), split and move modules to each dir
+- 1.79 improve audio play with wav over 1 min, add "note_display_offset_ms" to settings.toml for huge audio buffer environment.
+- 1.80 improve MixWaver Mode with gimmick

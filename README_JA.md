@@ -3,6 +3,7 @@
 Python で実装された、ターミナル上で動作するシンプルな BMS プレイヤーです。
 - `curses` による軽量 UI
 - 音声は **miniaudio**（純粋 Python ライブラリ）で再生
+   - 他のライブラリへの依存を極力抑え、**pynput**,**numpy**のみ任意で使用としています。
 
 ## 主な機能
 - **bms / bmson対応**
@@ -48,10 +49,12 @@ python3 cnnm.py path/to/your_chart.bms
 python3 bmsfd.py
 ```
 - fdライクなプレイリスト（曲選択画面）です。
-   - 他のモジュールからは独立しています。cnnm.py以外の他のbmsビューア・プレイヤーも引数で呼べるようにする予定です。
 - 上下キー(またはk/j)でカーソル移動、enterで選択orプレイ、backspaceで親ディレクトリに戻る、escで終了です。
 - 「l」キーでサブディレクトリのbmsを全て一覧表示します。（量が多いと時間がかかります）もう一度押すとtoggleします。
+- 「F7」キーでadvanced mode、使用頻度が低めの詳細設定等ができます。もう一度押すとtoggleします、
 - 先にsettings.tomlでお持ちのbmsがあるフォルダをallowed_rootsに設定しておいてください。
+- 他のモジュールからは独立しています。
+   - cnnm.py以外の他のbmsビューア・プレイヤーも呼び出せます（settings.tomlで設定）。
 
 ## メニュー画面例
 - 各キーでオプションを切り替え、Enterで開始します。
@@ -167,14 +170,14 @@ Shinonome-Mini -- Minimal Console BMS Player
 ```
 --soundonly #画面なし、曲再生のみ
 --nomenu #settings.tomlの設定でゲーム開始
---random, -r
---mirror, -m
---easy, -e
---hard, -h
---auto, -a
---autoscratch, -s
---solid
---mode=4k #ゲームモード強制
+--random, -r [on|off]
+--mirror, -m [on|off]
+--easy, -e [on|off]
+--hard, -h [on|off]
+--auto, -a [on|off]
+--autoscratch, -s [on|off]
+--solid [on|off]
+--mode=4k #ゲームモード強制 --mode-hintも同じ
 --mode=5k
 --mode=6k
 --mode=7k
@@ -185,6 +188,10 @@ Shinonome-Mini -- Minimal Console BMS Player
 --tiny #極小画面
 --none # --soundonlyと同じ
 --help
+--show-result [on|off]
+--stats [on|off]
+--mw #Mixwaver Mode
+--scan # --mwと同じ
 ```
 ## Notes & Caveats
 - UIはterminalだけです。グラフィカルUIはありません。
@@ -219,9 +226,9 @@ Shinonome-Mini -- Minimal Console BMS Player
 
 ## あとでやる
 - ver2.00まで
-   - cnnm.py以外の他のbmsビューア・プレイヤーも引数で呼べるようにする
+   - cnnm.py以外の他のbmsビューア・プレイヤーも引数で呼べるようにする(ok?)
 - ver2.50まで
-   - mixwaver-like
+   - mixwaver-mode(ok?)
    - マイナスBPM(?)
 
 ## minimalに保つためやらない
@@ -238,28 +245,31 @@ Shinonome-Mini -- Minimal Console BMS Player
 - preview
 - bmm, 774, n2s, gda, sm, osu等他の形式
    - 16-17chを使用したダブルスクラッチやフットペダル
-- ロングノートは見た目だけです（キーを離した判定ができないため）。そのためLN,CN,HCNの区別もありません。
+- #LNMODE x, #MGQ
+   - ロングノートは見た目だけです（キーを離した判定ができないため）。そのためLN,CN,HCNの区別もありません。
    - 押しっぱなしにすると次のノートでBADをとられる場合があるので少し早めに離してください。
 - ミュージックボックスを使う（昔の）bms
 - #WAVに絶対パスや親ディレクトリを指定したbms
-- #STP, #SPEED, #EXT, #SWITCH, etc
+- #STP, #SPEED, #EXT, #SWITCH, %URL, %mail, #EXBPM, #BASEBPM, etc
 - 18keys, 24keys, 48keys, etc
-- 1000小節以上のbms
+- 1000小節以上のbms、演奏に1日以上かかるbms
 - half、スキン
    - separateに対する5鍵のhalf表示。代わりにはならないかもしれませんが、"tiny"表示を使ってください。
-- SLOW/FAST表示
-   
+- SLOW/FAST表示、
+- "白/緑文字"
+- constant/max/min hispeed
+- 再生自体の加速
+- 空打ちPOOR（とりあえずありません）
+
 ## todoあとで確認
 - wav,bmp等がサブフォルダにわかれているbmsの動作確認
-- ロングノートの複雑な仕様の再確認（lnobj, lnmode, ln_type）
 - bmsonのときbpm確認（1ずれない？）
+   - 特に1分以上の1本wav等で少し音ズレしてます。bmsなら切り捨てますが、bmsonは仕様上音切りをプレイヤー側に任せうるので要調整…
 - bmsonのとき実質無音ノーツになってる？（音切りされていないbmsonの仕様）
-- global変数使うな
-- *.pyが散らばってきたのでディレクトリ分ける
 - do more tests, do more bms.
 
 ## changelog
-- ver1.50 基本的なbms再生(BPM変更、小節長変更、STOP、ロングノート、etc)
+- ver1.50 基本的なbms再生(BPM変更、小節長変更、STOP、ロングノート(type1,2,lnobj)、etc)
 - 1.53a BASE命令（36,62）
 - 1.53a 多重再生の改善（do not playback many-time with single #WAVxx definition）
    - bmsonではpolyphonyに該当する仕様
@@ -283,3 +293,10 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.71 リザルト表示、リザルト標準出力、autoplayでゲージが増えるように、その他エラーハンドリング
 - 1.72 短いロングノートの振る舞いのデバグ
 - 1.73 ゲージが十分にあってもfailedになる場合があるのを修正
+- 1.74 experimental MixWaver Mode
+- 1.75 --modeで強制的にモード指定したときの動作の修正
+- 1.76 option周りのリファクタ、リザルト画面でenterキーで終了するように
+- 1.77 bmsfd.pyからの外部ビューア呼び出しにひとまず対応、#totalが読めていなかったのを修正
+- 1.78 advanced menu(F7)、ほとんどのモジュールをフォルダ分け
+- 1.79 長尺wav（1分以上の1本wav等）の再生を若干改善、画面描画オフセット(note_display_offset_ms)設定追加(オーディオバッファが大きい環境向け)
+- 1.80 MixWaver Modeの改善（特にギミック譜面）

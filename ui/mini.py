@@ -1,6 +1,5 @@
 import curses
-import config
-from ui.base import BaseRenderer
+from ui.base import BaseRenderer, lane_info
 
 class MiniRenderer(BaseRenderer):
     """Mini (standard UI) Renderer."""
@@ -12,26 +11,11 @@ class MiniRenderer(BaseRenderer):
         self.start_y = start_y
         self.judgement_y = judgement_y_config
 
-        if self.mode == '14K':
-            self.lane_count = 16
-            self.half = 8
-            self.LANE_UNIT = "|" + "    |" * self.half + " " + "|" + "    |" * self.half
-            self.JUDGE_UNIT = "+" + "----+" * self.half + " " + "+" + "----+" * self.half
-        elif self.mode == '10K':
-            self.lane_count = 12
-            self.half = 6
+        self.lane_count, self.half = lane_info(self.mode)
+        if self.half > 0:
             self.LANE_UNIT = "|" + "    |" * self.half + " " + "|" + "    |" * self.half
             self.JUDGE_UNIT = "+" + "----+" * self.half + " " + "+" + "----+" * self.half
         else:
-            if self.mode == '9K':
-                self.lane_count = 9
-            elif self.mode in ('6K', '5K'):
-                self.lane_count = 6
-            elif self.mode == '4K':
-                self.lane_count = 4
-            else:  # 7K
-                self.lane_count = 8
-            self.half = 0
             self.LANE_UNIT = "|" + "    |" * self.lane_count
             self.JUDGE_UNIT = "+" + "----+" * self.lane_count
 
@@ -49,21 +33,13 @@ class MiniRenderer(BaseRenderer):
         else:
             return self.lane_x + 1 + lane_idx * 5
 
-    def render(self, stdscr, player, current_time, events, event_index, initial_bpm, resolution, auto_play, settings, key_names, lane_chars, quit_key_code, key_to_lane, speedup_keycode, speeddown_keycode, use_pynput, get_key_events):
-        base_speed = 22.0
-        speed = base_speed * settings.get('hispeed', 1.0)
-        if getattr(player, 'timeline', None):
-            beat_duration = 60.0 / player.initial_bpm
-            scale = speed * beat_duration
-            _, player_height, current_bpm, _ = player.timeline.get_state(current_time)
-        else:
-            scale = speed
-            player_height = current_time
-            current_bpm = getattr(player, 'current_bpm', initial_bpm)
+    def render(self, stdscr, player, current_time, events, event_index, initial_bpm, resolution, auto_play, opts, key_names, lane_chars, key_to_lane, use_pynput, get_key_events):
+        draw_time = self.get_draw_time(current_time, opts)
+        scale, player_height, current_bpm = self.calculate_scale_and_state(player, draw_time, initial_bpm, opts)
 
         self.safe_addstr(stdscr, 0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
-        self.safe_addstr(stdscr, 1, 2, f"Song: {player.chart['info'].get('title', 'Unknown')} / Artist: {player.chart['info'].get('artist', 'Unknown')}")
-        self.safe_addstr(stdscr, 2, 2, f"BPM: {current_bpm:.1f} | Time: {current_time:.2f}s | HS: {settings.get('hispeed', 1.0):.1f}")
+        self.safe_addstr(stdscr, 1, 2, f"Song: {player.chart['info'].get('title', '___')} / Artist: {player.chart['info'].get('artist', '___')}")
+        self.safe_addstr(stdscr, 2, 2, f"BPM: {current_bpm:.1f} | Time: {draw_time:.2f}s | HS: {opts.hispeed:.1f}")
 
         for y in range(self.start_y, self.judgement_y):
             self.safe_addstr(stdscr, y, self.lane_x, self.LANE_UNIT)
@@ -81,7 +57,8 @@ class MiniRenderer(BaseRenderer):
         else:
             self.safe_addstr(stdscr, self.judgement_y + 2, self.lane_x, "[       MANUAL PLAY ACTIVE         ]")
 
-        self.safe_addstr(stdscr, self.judgement_y + 4, self.lane_x, f"Press {config.quit_key_name} to quit playing")
+        #quit_key_name = opts.quit_key_name
+        self.safe_addstr(stdscr, self.judgement_y + 4, self.lane_x, f"Press {opts.quit_key_name} to quit playing")
 
         filled_segments = int(player.gauge / 5.0)
         bar_list = []
@@ -92,19 +69,19 @@ class MiniRenderer(BaseRenderer):
         gauge_attr = curses.A_BOLD
         if player.hard_mode:
             gauge_mode_label = "HARD "
-            gauge_mode_label2 = "SOLID" if settings['opt_solid'] else "GAUGE"
+            gauge_mode_label2 = "SOLID" if opts.solid else "GAUGE"
             if player.gauge <= 30.0:
                 gauge_attr |= curses.A_BLINK
             elif player.gauge >= 80.0:
                 gauge_attr |= curses.A_STANDOUT
         elif getattr(player, 'easy_mode', False):
             gauge_mode_label = "EASY "
-            gauge_mode_label2 = "SOLID" if settings['opt_solid'] else "GAUGE"
+            gauge_mode_label2 = "SOLID" if opts.solid else "GAUGE"
             if player.gauge >= 80.0:
                 gauge_attr |= curses.A_STANDOUT
         else:
             gauge_mode_label = ""
-            gauge_mode_label2 = "SOLID GAUGE" if settings['opt_solid'] else "GAUGE"
+            gauge_mode_label2 = "SOLID GAUGE" if opts.solid else "GAUGE"
             if player.gauge >= 80.0:
                 gauge_attr |= curses.A_STANDOUT
         self.safe_addstr(stdscr, self.stats_y, self.stat_x, f"{gauge_mode_label}{gauge_mode_label2}: [{gauge_bar}] {player.gauge:5.1f}%", gauge_attr)
@@ -138,11 +115,13 @@ class MiniRenderer(BaseRenderer):
             if player.combo >= 3 and player.last_judgement in ["PERFECT", "GREAT", "GOOD"]:
                 self.safe_addstr(stdscr, self.judgement_y + 7, self.lane_x + 14, f"{player.combo} COMBO", curses.A_BOLD)
 
+        draw_start_idx = self.get_draw_start_index(events, draw_time)
+
         # Draw measure lines (Background layer)
         if getattr(player, 'show_measure_lines', True):
-            for i in range(event_index, len(events)):
+            for i in range(draw_start_idx, len(events)):
                 event = events[i]
-                if event.get('state', 0) != 0 or event.get('channel') != 'measure_line':
+                if event.get('channel') != 'measure_line':
                     continue
 
                 y, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
@@ -151,9 +130,11 @@ class MiniRenderer(BaseRenderer):
                     self.safe_addstr(stdscr, y, self.lane_x, self.JUDGE_UNIT, curses.A_DIM)
 
         # Draw long note bodies (Foreground layer1)
-        for i in range(event_index, len(events)):
+        for i in range(draw_start_idx, len(events)):
             event = events[i]
-            if event.get('state', 0) != 0:
+            if event.get('ln_state') != 'end':
+                continue
+            if not self.is_note_visible(event, draw_time):
                 continue
 
             channel = event.get('channel')
@@ -161,42 +142,42 @@ class MiniRenderer(BaseRenderer):
             if lane_idx is None:
                 continue
 
-            if event.get('ln_state') == 'end':
-                start_ev = event.get('ln_partner')
-                if not start_ev:
-                    continue
-
-                y_end, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
-
-                if start_ev.get('state', 0) == 1:
-                    y_start = self.judgement_y
-                else:
-                    y_start, _ = self.calculate_y(start_ev, player, self.judgement_y, player_height, scale)
-                    
-                note_str = lane_chars[lane_idx]
-                x = self.lane_posx(lane_idx)
-
-                if start_ev.get('state', 0) == 0 and self.start_y <= y_start < self.judgement_y:
-                    self.safe_addstr(stdscr, y_start, x, note_str)
-                if event.get('state', 0) == 0 and self.start_y <= y_end < self.judgement_y:
-                    if settings.get('show_ln_end_head', False):
-                        self.safe_addstr(stdscr, y_end, x, note_str)
-                    else:
-                        self.safe_addstr(stdscr, y_end, x, " |")
-                for y_body in range(max(self.start_y, y_end + 1), min(self.judgement_y, y_start)):
-                    self.safe_addstr(stdscr, y_body, x, " |")
-
-        # Draw notes (Foreground layer2)
-        for i in range(event_index, len(events)):
-            event = events[i]
-            if event.get('state', 0) != 0:
+            start_ev = event.get('ln_partner')
+            if not start_ev:
                 continue
 
+            y_end, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
+
+            if start_ev.get('manual_hit') or (draw_time >= start_ev.get('time', 0.0)):
+                y_start = self.judgement_y
+            else:
+                y_start, _ = self.calculate_y(start_ev, player, self.judgement_y, player_height, scale)
+                
+            note_str = lane_chars[lane_idx]
+            x = self.lane_posx(lane_idx)
+
+            if not start_ev.get('manual_hit') and draw_time < start_ev.get('time', 0.0) and self.start_y <= y_start < self.judgement_y:
+                self.safe_addstr(stdscr, y_start, x, note_str)
+            if self.start_y <= y_end < self.judgement_y:
+                if opts.show_ln_end_head:
+                    self.safe_addstr(stdscr, y_end, x, note_str)
+                else:
+                    self.safe_addstr(stdscr, y_end, x, " |")
+            for y_body in range(max(self.start_y, y_end + 1), min(self.judgement_y, y_start)):
+                self.safe_addstr(stdscr, y_body, x, " |")
+
+        # Draw notes (Foreground layer2)
+        for i in range(draw_start_idx, len(events)):
+            event = events[i]
             channel = event.get('channel')
             if channel == 'measure_line':
                 continue
 
-            if event.get('ln_state') == 'end' and not settings.get('show_ln_end_head', False):
+            # Skip LN end heads in standard note loop if show_ln_end_head is disabled
+            if event.get('ln_state') == 'end' and not opts.show_ln_end_head:
+                continue
+
+            if not self.is_note_visible(event, draw_time):
                 continue
 
             lane_idx = self.get_lane_index(channel, player)
@@ -213,47 +194,18 @@ class MiniRenderer(BaseRenderer):
             if self.start_y <= y < self.judgement_y:
                 self.safe_addstr(stdscr, y, x_pos, note_str, note_attr)
             elif y >= self.judgement_y:
-                if current_time - target_seconds < 0.08:
+                if draw_time - target_seconds < 0.08:
                     self.safe_addstr(stdscr, self.judgement_y, x_pos, "FL", curses.A_REVERSE)
 
         beat_seconds = 60.0 / initial_bpm
-        beat_number = int(current_time / beat_seconds)
+        beat_number = int(draw_time / beat_seconds)
         if beat_number % 2 == 0:
             self.safe_addstr(stdscr, self.judgement_y, self.lane_x - 2, "*", curses.A_BOLD)
         else:
             self.safe_addstr(stdscr, self.judgement_y, self.lane_x - 2, " ")
         rotation_symbols = ["|", "/", "-", "\\"]
-        half_beat_number = int(current_time / (beat_seconds * 0.5))
+        half_beat_number = int(draw_time / (beat_seconds * 0.5))
         rot_char = rotation_symbols[half_beat_number % 4]
         self.safe_addstr(stdscr, self.judgement_y + 1, self.lane_x - 2, rot_char, curses.A_BOLD)
 
-        # Handle input
-        while True:
-            ch = stdscr.getch()
-            if ch == -1:
-                break
-            if ch == quit_key_code:
-                player.is_playing = False
-                continue
-            if ch in key_to_lane:
-                if not auto_play:
-                    player.press_key(key_to_lane[ch])
-                continue
-            if ch == speedup_keycode:
-                settings['hispeed'] = min(settings.get('hispeed', 1.0) + 0.2, 100.0)
-            elif ch == speeddown_keycode:
-                settings['hispeed'] = max(settings.get('hispeed', 1.0) - 0.2, 0.2)
-
-        key_events = get_key_events() if (use_pynput and get_key_events) else []
-        for ev_type, k in key_events:
-            if ev_type != "press" or not k:
-                continue
-            if k.startswith("'") and k.endswith("'") and len(k) >= 3:
-                k = k[1:-1]
-            if k.startswith("Key."):
-                k = k[4:]
-            mod_keys = settings.get('modifier_keys', {})
-            if k in mod_keys:
-                if not auto_play:
-                    player.press_key(mod_keys[k])
-                continue
+        self.process_input(stdscr, player, auto_play, opts, key_to_lane, use_pynput, get_key_events)

@@ -1,6 +1,6 @@
 import os
 
-from config import get_filename_variants, normalize_filename_chars
+from helpers.config import get_filename_variants, normalize_filename_chars
 
 def resolve_audio_path(base_path: str, relative_file_name: str) -> str | None:
     """
@@ -73,15 +73,8 @@ _MAX_PATH_LENGTH = 250
 #   - Bidirectional control characters: LRE, RLE, PDF, LRO, RLO (U+202A–U+202E)
 #   - Bidirectional isolate characters: LRI, RLI, FSI, PDI (U+2066–U+2069)
 #   - BOM / Zero Width No‑Break Space (U+FEFF)
-_SUSPICIOUS_UNICODE_RE = re.compile(
-    r'[\x00-\x1f'     # ASCII制御文字 (NUL〜US)
-    r'\x7f'            # DEL
-    r'\u200b-\u200f'   # ゼロ幅文字 (ZWSP, ZWNJ, ZWJ, LRM, RLM)
-    r'\u202a-\u202e'   # 方向性制御文字 (LRE, RLE, PDF, LRO, RLO)
-    r'\u2066-\u2069'   # 方向性分離文字 (LRI, RLI, FSI, PDI)
-    r'\ufeff'          # BOM / ZWNBSP
-    r']'
-)
+from helpers.sanitizer import _SUSPICIOUS_UNICODE_RE, has_suspicious_chars
+
 
 """
 Utility for sanitizing WAV paths referenced in BMS files.

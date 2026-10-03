@@ -1,6 +1,6 @@
 import curses
 import time
-import config
+from helpers.options import load_options
 
 
 def show_result(stdscr, player, quit_key_code: int, display_mode: str = 'mini'):
@@ -70,7 +70,8 @@ def show_result(stdscr, player, quit_key_code: int, display_mode: str = 'mini'):
         pr(6, 2, f"EX: {player.ex_score:4d}/{max_score:4d}")
         pr(7, 2, f"MAX:{player.max_combo:4d}")
 
-        footer = f"[{config.quit_key_name}] Quit"
+        quit_key_name = load_options().quit_key_name
+        footer = f"[{quit_key_name}] Quit"
         pr(8, (box_w - len(footer)) // 2, footer, curses.A_DIM)
     else:
         box_w = 50
@@ -121,14 +122,16 @@ def show_result(stdscr, player, quit_key_code: int, display_mode: str = 'mini'):
         max_g = getattr(player, 'max_gauge', player.gauge)
         pr(15, 5, f"MIN GAUGE: {min_g:5.1f}% / MAX GAUGE: {max_g:5.1f}%")
 
-        footer = f"Press [{config.quit_key_name}] to Quit"
+        quit_key_name = load_options().quit_key_name
+        footer = f"Press [{quit_key_name}] to Quit"
         pr(16, (box_w - len(footer)) // 2, footer, curses.A_DIM)
 
     stdscr.refresh()
     while True:
         time.sleep(0.05)
         key = stdscr.getch()
-        if key == quit_key_code:
+        if key in (10, 13, quit_key_code):
+        #if key == quit_key_code:
             break
         else:
             continue

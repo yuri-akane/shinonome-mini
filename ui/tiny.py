@@ -1,5 +1,5 @@
 import curses
-from ui.base import BaseRenderer
+from ui.base import BaseRenderer, lane_info
 
 class TinyRenderer(BaseRenderer):
     """Tiny (ultra-compact UI) Renderer.
@@ -19,40 +19,16 @@ class TinyRenderer(BaseRenderer):
         self.start_y = start_y
         self.judgement_y = judgement_y_config
 
-        if self.mode == '14K':
-            self.lane_count = 16
-            self.half = 8
-        elif self.mode == '10K':
-            self.lane_count = 12
-            self.half = 6
-        elif self.mode == '9K':
-            self.lane_count = 9
-            self.half = 0
-        elif self.mode in ('6K', '5K'):
-            self.lane_count = 6
-            self.half = 0
-        elif self.mode == '4K':
-            self.lane_count = 4
-            self.half = 0
-        else:  # 7K / default
-            self.lane_count = 8
-            self.half = 0
+        self.lane_count, self.half = lane_info(self.mode)
 
     def lane_posx(self, lane_idx: int) -> int:
         if self.half > 0 and lane_idx >= self.half:
             return self.lane_x + lane_idx + 1  # 1P/2P間の中央 '|' のため1文字右にシフト
         return self.lane_x + lane_idx
 
-    def render(self, stdscr, player, current_time, events, event_index, initial_bpm, resolution, auto_play, settings, key_names, lane_chars, quit_key_code, key_to_lane, speedup_keycode, speeddown_keycode, use_pynput, get_key_events):
-        base_speed = 22.0
-        speed = base_speed * settings.get('hispeed', 1.0)
-        if getattr(player, 'timeline', None):
-            beat_duration = 60.0 / player.initial_bpm
-            scale = speed * beat_duration
-            _, player_height, current_bpm, _ = player.timeline.get_state(current_time)
-        else:
-            scale = speed
-            player_height = current_time
+    def render(self, stdscr, player, current_time, events, event_index, initial_bpm, resolution, auto_play, opts, key_names, lane_chars, key_to_lane, use_pynput, get_key_events):
+        draw_time = self.get_draw_time(current_time, opts)
+        scale, player_height, _ = self.calculate_scale_and_state(player, draw_time, initial_bpm, opts)
 
         # Render Judgement Line as Gauge Bar
         # Gauge range 0.0 ~ 100.0 mapped across lane_count chars
@@ -81,11 +57,13 @@ class TinyRenderer(BaseRenderer):
             for y in range(self.start_y, self.judgement_y):
                 self.safe_addstr(stdscr, y, sep_x, "|", curses.A_DIM)
 
+        draw_start_idx = self.get_draw_start_index(events, draw_time)
+
         # Draw measure lines (Background layer)
         if getattr(player, 'show_measure_lines', True):
-            for i in range(event_index, len(events)):
+            for i in range(draw_start_idx, len(events)):
                 event = events[i]
-                if event.get('state', 0) != 0 or event.get('channel') != 'measure_line':
+                if event.get('channel') != 'measure_line':
                     continue
 
                 y, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
@@ -98,9 +76,11 @@ class TinyRenderer(BaseRenderer):
                     self.safe_addstr(stdscr, y, self.lane_x, m_line, curses.A_DIM)
 
         # Draw long note bodies (Foreground layer1)
-        for i in range(event_index, len(events)):
+        for i in range(draw_start_idx, len(events)):
             event = events[i]
-            if event.get('state', 0) != 0:
+            if event.get('ln_state') != 'end':
+                continue
+            if not self.is_note_visible(event, draw_time):
                 continue
 
             channel = event.get('channel')
@@ -108,47 +88,46 @@ class TinyRenderer(BaseRenderer):
             if lane_idx is None:
                 continue
 
-            if event.get('ln_state') == 'end':
-                start_ev = event.get('ln_partner')
-                if not start_ev:
-                    continue
-
-                y_end, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
-
-                if start_ev.get('state', 0) == 1:
-                    y_start = self.judgement_y
-                else:
-                    y_start, _ = self.calculate_y(start_ev, player, self.judgement_y, player_height, scale)
-
-                x = self.lane_posx(lane_idx)
-
-                # Head and tail rendering
-                if start_ev.get('state', 0) == 0 and self.start_y <= y_start < self.judgement_y:
-                    note_str = lane_chars.get(lane_idx, "*") if isinstance(lane_chars, dict) else lane_chars[lane_idx]
-                    head_char = note_str[0] if isinstance(note_str, str) and len(note_str) > 0 else "*"
-                    self.safe_addstr(stdscr, y_start, x, head_char)
-                if event.get('state', 0) == 0 and self.start_y <= y_end < self.judgement_y:
-                    if settings.get('show_ln_end_head', False):
-                        note_str = lane_chars.get(lane_idx, "*") if isinstance(lane_chars, dict) else lane_chars[lane_idx]
-                        end_char = note_str[0] if isinstance(note_str, str) and len(note_str) > 0 else "*"
-                        self.safe_addstr(stdscr, y_end, x, end_char)
-                    else:
-                        self.safe_addstr(stdscr, y_end, x, "|")
-                for y_body in range(max(self.start_y, y_end + 1), min(self.judgement_y, y_start)):
-                    self.safe_addstr(stdscr, y_body, x, "|")
-
-        # Draw notes (Foreground layer2)
-        for i in range(event_index, len(events)):
-            event = events[i]
-            if event.get('state', 0) != 0:
+            start_ev = event.get('ln_partner')
+            if not start_ev:
                 continue
 
+            y_end, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
+
+            if start_ev.get('manual_hit') or (draw_time >= start_ev.get('time', 0.0)):
+                y_start = self.judgement_y
+            else:
+                y_start, _ = self.calculate_y(start_ev, player, self.judgement_y, player_height, scale)
+
+            x = self.lane_posx(lane_idx)
+
+            # Head and tail rendering
+            if not start_ev.get('manual_hit') and draw_time < start_ev.get('time', 0.0) and self.start_y <= y_start < self.judgement_y:
+                note_str = lane_chars.get(lane_idx, "*") if isinstance(lane_chars, dict) else lane_chars[lane_idx]
+                head_char = note_str[0] if isinstance(note_str, str) and len(note_str) > 0 else "*"
+                self.safe_addstr(stdscr, y_start, x, head_char)
+            if self.start_y <= y_end < self.judgement_y:
+                if opts.show_ln_end_head:
+                    note_str = lane_chars.get(lane_idx, "*") if isinstance(lane_chars, dict) else lane_chars[lane_idx]
+                    end_char = note_str[0] if isinstance(note_str, str) and len(note_str) > 0 else "*"
+                    self.safe_addstr(stdscr, y_end, x, end_char)
+                else:
+                    self.safe_addstr(stdscr, y_end, x, "|")
+            for y_body in range(max(self.start_y, y_end + 1), min(self.judgement_y, y_start)):
+                self.safe_addstr(stdscr, y_body, x, "|")
+
+        # Draw notes (Foreground layer2)
+        for i in range(draw_start_idx, len(events)):
+            event = events[i]
             channel = event.get('channel')
             if channel == 'measure_line':
                 continue
 
             # Skip LN end heads in standard note loop if show_ln_end_head is disabled
-            if event.get('ln_state') == 'end' and not settings.get('show_ln_end_head', False):
+            if event.get('ln_state') == 'end' and not opts.show_ln_end_head:
+                continue
+
+            if not self.is_note_visible(event, draw_time):
                 continue
 
             lane_idx = self.get_lane_index(channel, player)
@@ -172,33 +151,4 @@ class TinyRenderer(BaseRenderer):
             if self.start_y <= y < self.judgement_y:
                 self.safe_addstr(stdscr, y, x_pos, note_str, note_attr)
 
-        # Handle input
-        while True:
-            ch = stdscr.getch()
-            if ch == -1:
-                break
-            if ch == quit_key_code:
-                player.is_playing = False
-                continue
-            if ch in key_to_lane:
-                if not auto_play:
-                    player.press_key(key_to_lane[ch])
-                continue
-            if ch == speedup_keycode:
-                settings['hispeed'] = min(settings.get('hispeed', 1.0) + 0.2, 100.0)
-            elif ch == speeddown_keycode:
-                settings['hispeed'] = max(settings.get('hispeed', 1.0) - 0.2, 0.2)
-
-        key_events = get_key_events() if (use_pynput and get_key_events) else []
-        for ev_type, k in key_events:
-            if ev_type != "press" or not k:
-                continue
-            if k.startswith("'") and k.endswith("'") and len(k) >= 3:
-                k = k[1:-1]
-            if k.startswith("Key."):
-                k = k[4:]
-            mod_keys = settings.get('modifier_keys', {})
-            if k in mod_keys:
-                if not auto_play:
-                    player.press_key(mod_keys[k])
-                continue
+        self.process_input(stdscr, player, auto_play, opts, key_to_lane, use_pynput, get_key_events)

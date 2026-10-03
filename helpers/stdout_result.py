@@ -7,8 +7,8 @@ def stdout_result_stats(player):
         return
 
     chart_info = player.chart.get('info', {}) if player.chart else {}
-    title = chart_info.get('title', 'Unknown')
-    artist = chart_info.get('artist', 'Unknown')
+    title = chart_info.get('title', '___')
+    artist = chart_info.get('artist', '___')
 
     is_dead = getattr(player, 'is_dead', False)
     hard_mode = getattr(player, 'hard_mode', False)

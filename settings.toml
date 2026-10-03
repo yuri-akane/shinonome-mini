@@ -1,14 +1,14 @@
-# settings.toml – configuration for Shinonome Mini ver1.72+
+# settings.toml – configuration for Shinonome Mini ver1.80+
 
 #roots for bmsfd.py
 #ここをお持ちのbmsのpathに書き換えてください。
 allowed_roots = ["../tmp","../tmp2"]
 
 [display]
-mode = "mini" # "mini", "tiny", "none" (or "soundonly")
+mode = "mini" # "mini", "tiny", "none" (or "soundonly"), "mw" (or "scan")
 
 [scratch]
-side="left" #"left" or "right"
+side = "left" #"left" or "right"
 
 # キーマッピング
 # お手数ですが、各キーの「shiftと一緒に押したときの文字」もセットで入力してください。（言語/キー配列によって異なるため）
@@ -116,19 +116,24 @@ auto_scratch  = false  # オートスクラッチ
 easy_mode     = false  # イージーモード (ゲージ減少量半分、判定緩和)
 hard_gauge    = false  # ハードモード（ゲージ0で強制終了、ゲージが減りやすく増えにくい、ゲージ残り少ないほどゲージ減少量も減）
 show_measure_lines = true # 小節線の表示ON/OFF
+
+#ハイスピ関係
 hispeed = 1.2
 speedup_key = "KEY_UP"
 speeddown_key = "KEY_DOWN"
 #他の単独キーでも可
 #speedup_key = "w"
 #speeddown_key = "q"
-solid_gauge = false  # SOLIDゲージ（初期値60%、クリア80%。ゲージ増減どちらも抑制、ゲージが100%に近いほど増加量減）
+
+# SOLIDゲージ（初期値60%、クリア80%。ゲージ増減どちらも抑制、ゲージが100%に近いほど増加量減）
+solid_gauge = false
 
 # ロングノートの終端をノーツとして表示するか(Show end head of long notes)
 # 密度が高いとロングノートなのか連打なのか区別できなくなるので「終端非表示」のほうがよいです。
 show_ln_end_head = false
+
 show_result = true # 曲終了時にリザルト画面を表示するかどうか
-stdout_result = false # 曲終了時に標準出力にリザルト（統計情報）を出力するかどうか
+stdout_result = false # 曲終了時に標準出力にリザルト（統計情報）を出力するかどうか cmd optionでは--stats
 
 # quit key configuration
 [quit]
@@ -139,6 +144,16 @@ key = "esc"
 [judgement]
 judgement_y = 20          # 判定ラインの画面行位置（デフォルト: 16）
 judgement_offset_ms = 0   # 判定タイミングのオフセット（ミリ秒、正の値で判定ライン到達より遅れて判定）
+note_display_offset_ms = 0 # ノーツ描画タイミングのオフセット（ミリ秒、正の値でノーツ描画を遅らせて表示、負の値で早めて表示）
+
+#設定例：audio buffer多めの環境
+#1.昔のPC等
+#judgement_offset_ms = 120
+#note_display_offset_ms = 100
+#2.仮想マシン等
+#judgement_offset_ms = 400
+#note_display_offset_ms = 370
+
 
 # オーディオ出力設定
 # CPUが貧弱な環境では sample_rate を下げる（例: 8000）と負荷が軽減されます。
@@ -147,7 +162,28 @@ judgement_offset_ms = 0   # 判定タイミングのオフセット（ミリ秒�
 sample_rate = 24000   # サンプリングレート: 8000/12000/16000/22050/24000/32000/44100/48000 など
 nchannels = 2         # チャンネル数: 1=モノラル, 2=ステレオ
 
+
 # BMSファイルテキスト読み込み設定
 [bms]
 encoding = "cp932"    # bmsテキストのエンコーディング ("cp932" / "cp949" / "utf-8")
+
+
+# 外部BMSプレイヤー・ビューアー起動設定
+# bmsfd.py から選択したBMSファイルを渡して起動するコマンドテンプレートを定義します。
+# {file} は選択されたBMSファイルの絶対パスに置き換えられます。
+[launchers]
+default = "cnnm"  # Enterキー押下時に起動するデフォルトランチャー
+
+[launchers.cnnm]
+name = "Shinonome Mini (cnnm.py)"
+command = ["python3", "cnnm.py", "{file}"]
+#command = ["python3", "cnnm.py", "{file}", "-r", "on"] #引数も渡せます
+
+[launchers.bmz-player]
+name = "bmz-player"
+command = ["bmz-player", "{file}"]
+
+[launchers.mbmplay]
+name = "mBMplay"
+command = ["mBMplay.exe", "{file}"]
 

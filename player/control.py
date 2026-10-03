@@ -1,4 +1,6 @@
 # control.py - modular handling of BPM and measure-length changes for Shinonome-Mini
+# 作成はしたが、process_control_event()以外は使われていない。
+# process_control_event()は別のモジュールに移管して、それ以外はモジュールごと削除。
 """Utility functions for processing control‑type events during playback.
 
 The parser already tags control events with the keys:

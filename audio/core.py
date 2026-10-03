@@ -10,7 +10,7 @@ try:
 except ImportError:
     _USE_NUMPY = False
 
-from config import load_audio_config, get_filename_variants, normalize_filename_chars
+from helpers.options import load_options
 from audio.resolve_audio_path import resolve_audio_path
 
 class AudioEngine:
@@ -25,9 +25,9 @@ class AudioEngine:
         self._total_count = 0
 
         # settings.toml からオーディオ設定を読み込む
-        audio_cfg = load_audio_config()
-        self.sample_rate = audio_cfg['sample_rate']
-        self.nchannels   = audio_cfg['nchannels']
+        opts = load_options()
+        self.sample_rate = opts.sample_rate
+        self.nchannels   = opts.nchannels
 
         # PlaybackDeviceの初期化 – バッファサイズは milliseconds で指定
         # 3msは攻めすぎてノイズ多いので10msに
@@ -38,6 +38,9 @@ class AudioEngine:
             buffersize_msec=10,
         )
         
+        # 再生済みフレーム数（オーディオマスタークロック用）
+        self.played_frames = 0
+
         # ジェネレータの作成と起動
         self.generator = self._mix_generator()
         next(self.generator) # 最初のyieldまで進める
@@ -95,6 +98,7 @@ class AudioEngine:
 
                 # Clip and convert to signed 16-bit bytes
                 output = np.clip(output_buf, -32768, 32767).astype(np.int16)
+                self.played_frames += required_frames
                 required_frames = yield output.tobytes()
 
         else:
@@ -135,6 +139,7 @@ class AudioEngine:
                     for val in output_list
                 ]
                 output = array.array('h', clipped)
+                self.played_frames += required_frames
                 required_frames = yield output.tobytes()
 
     def load_sound(self, sound_id, file_path):
@@ -218,10 +223,21 @@ class AudioEngine:
         else:
             pass # サイレント
 
+    def reset_clock(self):
+        """オーディオマスタークロック（フレーム数）をリセット"""
+        with self.lock:
+            self.played_frames = 0
+
+    def get_audio_time(self) -> float:
+        """再生済みオーディオフレーム数に基づく現在時刻（秒）を返す"""
+        with self.lock:
+            return self.played_frames / self.sample_rate
+
     def stop_all(self):
         """すべての音を停止"""
         with self.lock:
             self.active_sounds.clear()
+            self.played_frames = 0
 
     def close(self):
         """デバイスを閉じる"""

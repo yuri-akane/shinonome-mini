@@ -1,7 +1,7 @@
 from typing import Any
 
 #TODO: lazy import or delete it from bms[on]parser
-from timing import BpmTimeline, stop_seconds
+from parser.timing import BpmTimeline, stop_seconds
 
 
 def _playable_channels() -> set[str]:

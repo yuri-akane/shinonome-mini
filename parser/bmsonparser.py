@@ -8,7 +8,7 @@ from player.mine import is_mine_channel, decode_mine_damage, decode_mine_damage_
 from parser.mode_detector import detect_mode_from_bmson
 from parser.util import get_event_priority, filter_duplicate_01_events, build_timeline, calculate_event_times, resolve_ln_partners
 
-from config import load_bms_encoding
+from helpers.options import load_options
 
 class BmsonParser:
     def __init__(self):
@@ -78,8 +78,8 @@ class BmsonParser:
         detected_mode = detect_mode_from_bmson(raw_mode_hint, used_x, ext_is_pms)
 
         song_info = {
-            'title': info_data.get('title', 'Unknown'),
-            'artist': info_data.get('artist', 'Unknown'),
+            'title': info_data.get('title', '___'),
+            'artist': info_data.get('artist', '___'),
             'bpm': info_data.get('init_bpm', info_data.get('bpm', 130.0)),
             'rank': info_data.get('judge_rank', 3),
             'total': info_data.get('total', None),
@@ -249,7 +249,6 @@ class BmsonParser:
             y = stop_ev.get('y', 0)
             duration = stop_ev.get('duration', 0)
             if duration > 0:
-                # stop_val = 48.0 * duration / resolution
                 stop_val = 48.0 * duration / resolution
                 events.append({
                     'beat': y / resolution,

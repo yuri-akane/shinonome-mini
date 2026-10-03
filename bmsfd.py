@@ -132,8 +132,7 @@ def load_settings() -> dict:
     """
     Load allowed root directories from settings.toml in the repository root.
     If the file or key is missing, all paths are considered allowed.
-    Also reads the BMS encoding setting and returns it as part of the config.
-    Returns a dictionary with keys 'roots' (set[Path]) and 'encoding' (str).
+    Also reads the BMS encoding setting and launchers configuration.
     """
     try:
         import tomllib
@@ -142,14 +141,18 @@ def load_settings() -> dict:
 
     repo_root = Path(__file__).resolve().parent
     settings_file = repo_root / "settings.toml"
+    default_launchers = {
+        "default": "cnnm",
+        "cnnm": {"name": "Shinonome Mini (cnnm.py)", "command": ["python3", "cnnm.py", "{file}"]}
+    }
     if not settings_file.exists():
-        return {"roots": set(), "encoding": "cp932"}  # allow all, default encoding
+        return {"roots": set(), "encoding": "cp932", "launchers": default_launchers}
 
     try:
         with settings_file.open("rb") as f:
             data = tomllib.load(f)
     except Exception:  # pragma: no cover
-        return {"roots": set(), "encoding": "cp932"}
+        return {"roots": set(), "encoding": "cp932", "launchers": default_launchers}
 
     roots = data.get("allowed_roots", [])
     allowed = set()
@@ -158,7 +161,13 @@ def load_settings() -> dict:
         allowed.add(p)
 
     encoding = data.get("bms", {}).get("encoding", "cp932")
-    return {"roots": allowed, "encoding": encoding}
+    launchers = data.get("launchers", default_launchers)
+    if "default" not in launchers:
+        launchers["default"] = "cnnm"
+    if "cnnm" not in launchers:
+        launchers["cnnm"] = default_launchers["cnnm"]
+
+    return {"roots": allowed, "encoding": encoding, "launchers": launchers}
 
 def is_allowed(target: Path, allowed_roots: set[Path]) -> bool:
     """
@@ -183,27 +192,43 @@ def is_allowed(target: Path, allowed_roots: set[Path]) -> bool:
     return False
 
 # ----------------------------------------------------------------------
-def open_file_with_cnnm(stdscr, path: Path) -> curses.window:
+def launch_external_app(stdscr, cmd_template: list[str] | str, path: Path) -> tuple[curses.window, str | None]:
     """
-    Temporarily leave curses mode to run cnnm on the given file.
-    After cnnm exits, re‑enter curses and restore the terminal state.
-    Returns the new stdscr window object for continued use.
+    Temporarily leave curses mode to run an external launcher/player on *path*.
+    *cmd_template* can be a list of strings or a string containing '{file}'.
+    After the process exits, re-enter curses and restore the terminal state.
+    Returns (new_stdscr, error_message).
     """
     if not path.exists() or not path.is_file():
-        return stdscr
-    # Reject paths containing suspicious Unicode characters (control chars,
-    # zero‑width spaces, bidirectional controls, BOM) that could confuse the
-    # terminal or obscure malicious filenames.
+        return stdscr, "Error: Selected item is not a valid file."
     if has_suspicious_chars(str(path)):
-        return stdscr
-    # End curses so that cnnm can take over the terminal
+        return stdscr, "Error: File path contains suspicious characters."
+
+    # Format the command arguments
+    if isinstance(cmd_template, str):
+        cmd = [cmd_template.format(file=str(path))]
+    elif isinstance(cmd_template, list):
+        cmd = [arg.format(file=str(path)) for arg in cmd_template]
+    else:
+        return stdscr, "Error: Invalid launcher command configuration."
+
     curses.endwin()
+    err_msg = None
     try:
-        subprocess.run(["python3", "cnnm.py", str(path)])
+        subprocess.run(cmd)
+    except FileNotFoundError:
+        err_msg = f"Error: Command not found ({cmd[0]})"
+    except Exception as e:
+        err_msg = f"Error launching app: {e}"
     finally:
-        # Reinitialize curses after cnnm exits
         new_stdscr = curses.initscr()
         curses.curs_set(0)
+    return new_stdscr, err_msg
+
+
+def open_file_with_cnnm(stdscr, path: Path) -> curses.window:
+    """Compatibility wrapper that launches cnnm on the given file."""
+    new_stdscr, _ = launch_external_app(stdscr, ["python3", "cnnm.py", "{file}"], path)
     return new_stdscr
 
 # ----------------------------------------------------------------------
@@ -265,6 +290,51 @@ def build_entries(
     )
 
 
+def make_preview_lines(target_path: Path, is_dir: bool, encoding: str) -> list[str] | None:
+    """
+    Generate preview lines for a given file or directory path.
+    For song files, parses metadata. For directories, lists contained song files.
+    """
+    if not is_dir and target_path.suffix.lower() in SUPPORTED_EXTENSIONS:
+        try:
+            props = parse_song_file(target_path, encoding)
+            lines = []
+            order = ["genre", "title", "subtitle", "artist",
+                     "subartist", "playlevel", "bpm"]
+            for key in order:
+                val = props.get(key, "")
+                if val:
+                    lines.append(f"{key.title()}: {sanitize_display_string(val)}")
+                else:
+                    lines.append("")
+            return lines
+        except Exception:
+            return None
+    elif is_dir:
+        try:
+            bms_files = sorted(
+                (p for p in target_path.iterdir()
+                 if p.suffix.lower() in SUPPORTED_EXTENSIONS),
+                key=lambda p: p.name.lower()
+            )
+            return [f"{p.name}" for p in bms_files]
+        except Exception:
+            return None
+    return None
+
+
+def draw_preview(stdscr, preview_lines: list[str] | None, prop_start_row: int, prop_rows: int, w: int):
+    """Draw preview lines in the designated curses preview area."""
+    if preview_lines is not None and prop_rows > 0:
+        for i, line in enumerate(preview_lines):
+            if i >= prop_rows:
+                break
+            try:
+                stdscr.addnstr(prop_start_row + i, 0, f"{line}", w - 1, curses.A_BOLD)
+            except curses.error:
+                pass
+
+
 # ----------------------------------------------------------------------
 def main(stdscr):
     # --------------------------------------------------------------
@@ -322,6 +392,11 @@ def main(stdscr):
     # State for status / error message
     status_msg: str | None = None
 
+    launchers = config.get("launchers", {})
+    default_launcher_key = launchers.get("default", "cnnm")
+    default_launcher_cfg = launchers.get(default_launcher_key, {})
+    default_cmd_template = default_launcher_cfg.get("command", ["python3", "cnnm.py", "{file}"])
+
     # --------------------------------------------------------------
     # 2. Main event loop
     # --------------------------------------------------------------
@@ -360,13 +435,9 @@ def main(stdscr):
         #   last row   : help line
         # ------------------------------------------------------------------
         top_offset = 0
-        if path == Path("/"):
-            header_row = 0
-        else:
-            header_row = 0
 
         msg_rows = 1 if display_msg else 0
-        prop_start_row = header_row + msg_rows + 1  # one blank line after header/message
+        prop_start_row = msg_rows + 1
         prop_rows = min(7, max(h - prop_start_row - 2, 0))  # leave last line for help
         entry_start_row = prop_start_row + prop_rows + 1   # one blank line after preview
 
@@ -419,33 +490,33 @@ def main(stdscr):
             stdscr.addstr(entry_start_row + idx, 0, line[: w-1], attr)
 
         # ------------------------------------------------------------------
-        # Show preview if the user has requested it with Space and we have room
+        # Update preview automatically for current selection
         # ------------------------------------------------------------------
-        if preview_lines is not None and prop_rows > 0:
-            max_prop_rows = prop_rows   # use the allocated property area
+        sel_entry = entries[selected] if entries else None
+        if path != Path("/") and sel_entry:
+            if not list_mode:
+                target = path / sel_entry
+                preview_lines = make_preview_lines(target, sel_entry.is_dir(), encoding)
+            else:
+                # In list mode, sel_entry is a file path
+                preview_lines = make_preview_lines(sel_entry, False, encoding)
+        else:
+            preview_lines = None
 
-            for i, line in enumerate(preview_lines):
-                if i >= max_prop_rows:
-                    break
-                try:
-                    stdscr.addnstr(prop_start_row + i,
-                                   0,
-                                   f"{line}",
-                                   w-1,
-                                   curses.A_BOLD)
-                except curses.error:
-                    # ignore lines that don't fit (e.g., very small terminal)
-                    pass
+        # Draw preview area
+        draw_preview(stdscr, preview_lines, prop_start_row, prop_rows, w)
 
         # ------------------------------------------------------------------
         # Help / key‑function legend at the bottom line (row h‑1)
         # ------------------------------------------------------------------
-        help_msg = "Esc: quit | Backspace/..: up | Enter: open dir / play file | L: list all BMS recursively (toggle)"
+        help_msg = f"Esc: quit | Backspace/..: up | Enter: open dir / play ({default_launcher_key}) | L: list all (toggle)"
         try:
             stdscr.addnstr(h - 1, 0, help_msg, w-1, curses.A_DIM)
         except curses.error:
             # terminal too small to show the help line; ignore
             pass
+
+        stdscr.refresh()
 
         # --- key handling -----------------------------------------
         key = stdscr.getch()
@@ -460,7 +531,7 @@ def main(stdscr):
             elif key in (curses.KEY_ENTER, 10, 13):
                 chosen = entries[selected]
                 if not chosen.is_dir():
-                    stdscr = open_file_with_cnnm(stdscr, chosen)
+                    stdscr, status_msg = launch_external_app(stdscr, default_cmd_template, chosen)
             elif key == ord('l'):
                 # Toggle off list mode
                 list_mode = False
@@ -510,8 +581,8 @@ def main(stdscr):
                                 preview_lines = None
                                 preview_file = None
                         else:
-                            # File selected: open with cnnm and return to browser
-                            stdscr = open_file_with_cnnm(stdscr, new_path)
+                            # File selected: open with configured launcher and return to browser
+                            stdscr, status_msg = launch_external_app(stdscr, default_cmd_template, new_path)
             elif key in (curses.KEY_BACKSPACE, 127):
                 status_msg = None
                 if path != Path("/"):
@@ -541,77 +612,6 @@ def main(stdscr):
                 offset = selected
             elif selected >= offset + max_entry_rows:
                 offset = selected - max_entry_rows + 1
-
-        # ------------------------------------------------------------------
-        # Update preview automatically when the cursor moves onto a file or directory
-        # ------------------------------------------------------------------
-        sel_entry = entries[selected] if entries else None
-        if path != Path("/") and sel_entry:
-            if not list_mode:
-                if not sel_entry.is_dir() and sel_entry.suffix.lower() in SUPPORTED_EXTENSIONS:
-                    try:
-                        props = parse_song_file(path / sel_entry, encoding)
-                        preview_lines = []
-                        # Display order requested by the user.
-                        order = ["genre", "title", "subtitle", "artist",
-                                 "subartist", "playlevel", "bpm"]
-                        for key in order:
-                            val = props.get(key, "")
-                            if val:
-                                # Strip suspicious chars (control chars, BiDi,
-                                # zero‑width spaces, BOM) before display.
-                                preview_lines.append(
-                                    f"{key.title()}: {sanitize_display_string(val)}"
-                                )
-                            else:
-                                preview_lines.append("")
-                    except Exception:
-                        preview_lines = None
-                elif sel_entry.is_dir():
-                    try:
-                        bms_files = sorted(
-                            (p for p in (path / sel_entry).iterdir()
-                             if p.suffix.lower() in SUPPORTED_EXTENSIONS),
-                            key=lambda p: p.name.lower()
-                        )
-                        preview_lines = [f"{p.name}" for p in bms_files]
-                    except Exception:
-                        preview_lines = None
-            else:
-                # In list mode, sel_entry is a file path
-                try:
-                    props = parse_song_file(sel_entry, encoding)
-                    preview_lines = []
-                    order = ["genre", "title", "subtitle", "artist",
-                             "subartist", "playlevel", "bpm"]
-                    for key in order:
-                        val = props.get(key, "")
-                        if val:
-                            # Strip suspicious chars before display.
-                            preview_lines.append(
-                                f"{key.title()}: {sanitize_display_string(val)}"
-                            )
-                        else:
-                            preview_lines.append("")
-                except Exception:
-                    preview_lines = None
-        else:
-            preview_lines = None
-
-        # After handling keys, redraw preview if needed (in case Space was pressed)
-        if preview_lines is not None and prop_rows > 0:
-            max_prop_rows = prop_rows
-            for i, line in enumerate(preview_lines):
-                if i >= max_prop_rows:
-                    break
-                try:
-                    stdscr.addnstr(prop_start_row + i,
-                                   0,
-                                   f"{line}",
-                                   w-1,
-                                   curses.A_BOLD)
-                except curses.error:
-                    pass
 
         # ------------------------------------------------------------------
         # Load more entries from the pending queue when scrolling down.
