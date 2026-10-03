@@ -295,4 +295,4 @@ normal gauge.
 - 1.77 external viewer via bmsfd.py, debug reading #total
 - 1.78 advanced menu(F7), split and move modules to each dir
 - 1.79 improve audio play with wav over 1 min, add "note_display_offset_ms" to settings.toml for huge audio buffer environment.
-- 1.80 improve MixWaver Mode with gimmick
+- 1.80 improve MixWaver Mode
