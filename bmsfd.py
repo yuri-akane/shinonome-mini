@@ -526,8 +526,27 @@ def main(stdscr):
             # Navigation within list mode
             if key in (curses.KEY_UP, ord('k')):
                 selected = max(0, selected - 1)
+                if selected < offset:
+                    offset = selected
             elif key in (curses.KEY_DOWN, ord('j')):
                 selected = min(len(entries) - 1, selected + 1)
+                if selected >= offset + max_entry_rows:
+                    offset = selected - max_entry_rows + 1
+            elif key == curses.KEY_PPAGE:           # Page Up: 5つ上
+                selected = max(0, selected - 5)
+                if selected < offset:
+                    offset = selected
+            elif key == curses.KEY_NPAGE:           # Page Down: 5つ下
+                selected = min(len(entries) - 1, selected + 5)
+                if selected >= offset + max_entry_rows:
+                    offset = selected - max_entry_rows + 1
+            elif key == curses.KEY_HOME:            # Home: 先頭
+                selected = 0
+                offset = 0
+            elif key == curses.KEY_END:             # End: 末尾
+                selected = max(0, len(entries) - 1)
+                if selected >= offset + max_entry_rows:
+                    offset = selected - max_entry_rows + 1
             elif key in (curses.KEY_ENTER, 10, 13):
                 chosen = entries[selected]
                 if not chosen.is_dir():
@@ -543,6 +562,21 @@ def main(stdscr):
                     offset = selected
             elif key in (curses.KEY_DOWN, ord('j')):
                 selected = min(len(entries) - 1, selected + 1)
+                if selected >= offset + max_entry_rows:
+                    offset = selected - max_entry_rows + 1
+            elif key == curses.KEY_PPAGE:           # Page Up: 5つ上
+                selected = max(0, selected - 5)
+                if selected < offset:
+                    offset = selected
+            elif key == curses.KEY_NPAGE:           # Page Down: 5つ下
+                selected = min(len(entries) - 1, selected + 5)
+                if selected >= offset + max_entry_rows:
+                    offset = selected - max_entry_rows + 1
+            elif key == curses.KEY_HOME:            # Home: 先頭
+                selected = 0
+                offset = 0
+            elif key == curses.KEY_END:             # End: 末尾
+                selected = max(0, len(entries) - 1)
                 if selected >= offset + max_entry_rows:
                     offset = selected - max_entry_rows + 1
             elif key in (curses.KEY_ENTER, 10, 13):

@@ -51,7 +51,7 @@ python3 bmsfd.py
 - fdライクなプレイリスト（曲選択画面）です。
 - 上下キー(またはk/j)でカーソル移動、enterで選択orプレイ、backspaceで親ディレクトリに戻る、escで終了です。
 - 「l」キーでサブディレクトリのbmsを全て一覧表示します。（量が多いと時間がかかります）もう一度押すとtoggleします。
-- 「F7」キーでadvanced mode、使用頻度が低めの詳細設定等ができます。もう一度押すとtoggleします、
+- 「F7」キーでadvanced mode、使用頻度が低めの詳細設定等ができます。もう一度押すとtoggleします。
 - 先にsettings.tomlでお持ちのbmsがあるフォルダをallowed_rootsに設定しておいてください。
 - 他のモジュールからは独立しています。
    - cnnm.py以外の他のbmsビューア・プレイヤーも呼び出せます（settings.tomlで設定）。
@@ -258,13 +258,15 @@ Shinonome-Mini -- Minimal Console BMS Player
 - SLOW/FAST表示、
 - "白/緑文字"
 - constant/max/min hispeed
-- 再生自体の加速
+- 再生自体の加速（1.5倍速再生等）
 - 空打ちPOOR（とりあえずありません）
+- フォルダ分け、ランダム選択、course play、段位
 
 ## todoあとで確認
 - wav,bmp等がサブフォルダにわかれているbmsの動作確認
 - bmsonのときbpm確認（1ずれない？）
    - 特に1分以上の1本wav等で少し音ズレしてます。bmsなら切り捨てますが、bmsonは仕様上音切りをプレイヤー側に任せうるので要調整…
+   - 若干改善しましたが要確認(@ver1.79)
 - bmsonのとき実質無音ノーツになってる？（音切りされていないbmsonの仕様）
 - do more tests, do more bms.
 
@@ -300,3 +302,4 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.78 advanced menu(F7)、ほとんどのモジュールをフォルダ分け
 - 1.79 長尺wav（1分以上の1本wav等）の再生を若干改善、画面描画オフセット(note_display_offset_ms)設定追加(オーディオバッファが大きい環境向け)
 - 1.80 MixWaver Modeの改善
+- 1.81 MixWaver Modeの改善（特にギミック譜面） (bpm>basebpm*100 or bpm>10000で振る舞いが変わるようにしました)、bmsfd.pyの操作性改善(pgdn/pgup/home/end)

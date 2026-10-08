@@ -254,13 +254,15 @@ normal gauge.
 - show SLOW/FAST
 - "white/green number"
 - constant/max/min hispeed
-- 再生自体の加速
-- 空打ちPOOR（とりあえずありません）
+- Acceleration of playback itself (e.g., 1.5× speed playback)
+- Empty hit POOR (none for now)
+- Folder division, random selection, course play, rank course
 
 ## TODO (to be verified later)
 - Verify bms support that resources (wav, bmp) are divided into subfolders
 - Verify BPM alignment when using bmson (ensure no "-1" bpm offset).
    - espacially, wav/mp3 over 1min (bmson)
+   - Verify as imporoved at ver1.79
 - Check that bmson charts do not produce silent notes. (about bmson that doesnot cut WAVs.)
 - do more tests, do more bms.
 
@@ -296,3 +298,4 @@ normal gauge.
 - 1.78 advanced menu(F7), split and move modules to each dir
 - 1.79 improve audio play with wav over 1 min, add "note_display_offset_ms" to settings.toml for huge audio buffer environment.
 - 1.80 improve MixWaver Mode
+- 1.81 improve MixWaver Mode with gimmick bms (behavior changes if bpm>basebpm*100 or bpm>10000), improved usability of bmsfd.py(pgdn/pgup/home/end)

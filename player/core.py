@@ -409,16 +409,51 @@ class Player:
         # Prepare event flags and count playable notes
         self._init_event_state()
 
+        # #1: 叩けるノーツが0小節目または1小節目（開始直後）に配置されている場合、
+        # 最初の2小節分（8拍分）を補うように全イベント（およびtimeline）の時刻をシフトする
+        first_playable_time = min(
+            (ev['time'] for ev in events if ev.get('is_playable')),
+            default=None
+        )
+        # 2小節分に相当する秒数 (4拍 * 2小節 = 8拍分) を計算。最低でも2.0秒を確保
+        lead_in_seconds = max(2.0, (240.0 / max(1.0, initial_bpm)) * 2.0)
+        if first_playable_time is not None and first_playable_time < lead_in_seconds:
+            time_offset = lead_in_seconds - first_playable_time
+            for ev in events:
+                ev['time'] += time_offset
+            if hasattr(self, 'timeline') and self.timeline:
+                if hasattr(self.timeline, 'segments'):
+                    # BpmTimeline クラスの場合: 各セグメントの時間と検索用テーブルをシフト
+                    for seg in self.timeline.segments:
+                        seg.start_time += time_offset
+                        seg.end_time += time_offset
+                    if hasattr(self.timeline, '_segment_start_times'):
+                        self.timeline._segment_start_times = [s.start_time for s in self.timeline.segments]
+                elif isinstance(self.timeline, list):
+                    for tl_point in self.timeline:
+                        if isinstance(tl_point, dict) and 'time' in tl_point:
+                            tl_point['time'] += time_offset
+
         self.audio.reset_clock()
         self.start_time = time.perf_counter()
         event_index = 0
         miss_check_index = 0  # 見逃しMISS判定専用インデックス（event_indexとは独立して管理）
         self.current_bpm = initial_bpm
 
-        # 小節長変更(02)や小節線(measure_line)を除いた、演奏・演出に関わる実質的な最終イベント時刻を算出
+        # 演奏・演出に関わる実質的なイベントを厳密に抽出:
+        # 1. 叩けるノーツ（無音ノーツ含む is_playable）
+        # 2. 地雷 (is_mine)
+        # 3. 実際に音源が定義されているBGM/キー音
+        # 4. 譜面進行に関わる制御命令 (BPM変化, STOP)
+        # ※ 小節線(measure_line)、小節長変更(02)、中身のないダミーイベントは除外
+        wav_table = self.chart.get('wav_table', {}) if self.chart else {}
         meaningful_events = [
             ev for ev in events
-            if ev.get('channel') not in ('02', 'measure_line')
+            if ev.get('is_playable')
+            or ev.get('is_mine')
+            or (ev.get('sound_id') and ev.get('sound_id') in wav_table)
+            or 'bpm' in ev
+            or 'stop' in ev
         ]
         if meaningful_events:
             last_event_time = max(ev['time'] for ev in meaningful_events)
@@ -432,15 +467,14 @@ class Player:
         while self.is_playing:
             current_time = self.get_current_time()
 
-            # 全イベントが処理済みになったかチェック (O(1) 最適化)
-            # 最後のイベントの時刻に達するまでは絶対に全処理完了にはならない
-            if current_time > last_event_time + 2: #lasteventですぐに終了画面にしない、2秒待つ
-                if event_index >= len(events):
-                    all_processed = True
-                else:
-                    all_processed = all(ev.get('state', 0) != 0 for ev in events[event_index:])
-            else:
-                all_processed = False
+            # #2: 終了判定チェック
+            # 最後の意味のあるイベント時刻 + 2秒 を楽曲時間基準で経過しており、
+            # かつ叩けるノーツが全て処理済み（HITまたはMISS）であるか
+            time_elapsed_after_end = (current_time >= last_event_time + 2.0)
+            playable_completed = (event_index >= len(events)) or all(
+                ev.get('state', 0) != 0 for ev in meaningful_events if ev.get('is_playable')
+            )
+            all_processed = time_elapsed_after_end and playable_completed
 
             # 自動発音（BGM または AutoPlay時のプレイノーツ、およびBPM変化イベント）
             while event_index < len(events):
@@ -570,8 +604,9 @@ class Player:
                     if current_time - (target_seconds + offset_seconds) > bad_w:
                         event['state'] = 2  # 無害に期限切れにする
 
-            # 終了条件：全イベントが処理され、かつ再生中の音がすべて消えた
-            if all_processed and len(self.audio.active_sounds) == 0:
+            # 終了条件：ノーツ完了・最終イベントから2秒経過し、かつ再生中の音がすべて消えた
+            # （万が一音声バッファに微小ノイズ等が残るケースに備え、最終イベント後6秒経過でも安全に終了）
+            if all_processed and (len(self.audio.active_sounds) == 0 or current_time > last_event_time + 6.0):
                 time.sleep(0.005)
                 self.is_playing = False
                 break
