@@ -31,8 +31,64 @@ def safe_addstr(stdscr, y: int, x: int, text: str, attr=curses.A_NORMAL):
         pass
 
 
-def run_soundonly(args):
-    """--soundonly 時のエントリーポイント。curses なしで音声のみ再生する。"""
+def run_soundonly(args, preloaded_player=None, preloaded_ae=None):
+    """--soundonly 時、またはメニューで NONE を選んだ時のエントリーポイント。
+    curses なしで音声のみ再生する。
+
+    preloaded_player が渡された場合はチャートと音声データを再利用し、
+    新しい AudioEngine デバイスにサウンドデータを移植して再生する。
+    """
+    if preloaded_player is not None:
+        # --- メニューからの移行パス ---
+        player = preloaded_player
+
+        # 新しいデバイスを立ち上げ、デコード済みデータを移植（再デコード不要）
+        ae = AudioEngine()
+        if preloaded_ae is not None:
+            ae.sounds = preloaded_ae.sounds
+            ae.load_errors = preloaded_ae.load_errors
+            ae._loaded_count = preloaded_ae._loaded_count
+            ae._total_count = preloaded_ae._total_count
+        player.audio = ae  # player が新しい ae を使うよう差し替え
+
+        title = sanitize_display_string(player.chart['info'].get('title', '___')) if player.chart else '___'
+        artist = sanitize_display_string(player.chart['info'].get('artist', '___')) if player.chart else '___'
+        print(f'Title : {title}')
+        print(f'Artist: {artist}')
+
+        # 音声ロードが完了していない場合は待機
+        if player.audio.is_loading:
+            print('Loading audio...', end='', flush=True)
+            while player.audio.is_loading:
+                time.sleep(0.1)
+                loaded, total = player.audio.loading_progress
+                print(f'\rLoading audio... ({loaded}/{total})    ', end='', flush=True)
+            print('\rAudio ready.                      ')
+
+        init_settings = load_initial_settings(player, args)
+        opts = init_settings['opts']
+
+        result = prepare_game_start(player, opts, init_settings['channel_to_lane'])
+
+        print('Playing... (Press Enter to stop)')
+
+        def dummy_on_update(current_time, events, event_index, initial_bpm,
+                            resolution, auto_play):
+            if msvcrt is not None:
+                if msvcrt.kbhit():
+                    ch = msvcrt.getwch()
+                    if ch in ('\r', '\n'):
+                        player.is_playing = False
+            else:
+                if select.select([sys.stdin], [], [], 0)[0]:
+                    sys.stdin.readline()
+                    player.is_playing = False
+
+        player.play(on_update=dummy_on_update, auto_play=True)
+        ae.close()
+        return
+
+    # --- CLI --soundonly パス（従来通り） ---
     if not args.bmsfile:
         print('Error: Please specify a BMS file as an argument.')
         print('Example: python3 cnnm.py path/to/song.bms --soundonly')
@@ -163,11 +219,13 @@ def main(stdscr, args):
         KEY_TO_LANE      = result['KEY_TO_LANE']
 
         on_update = make_on_update(stdscr, player, KEY_TO_LANE, opts, lane_chars)
+        stdscr.clear()
+        stdscr.refresh()
         player.play(on_update=on_update, auto_play=opts.autoplay)
         if not opts.autoplay and (player.is_dead or opts.show_result):
             show_result(stdscr, player, opts.quit_key_code, display_mode=opts.display_mode)
         ae.close()
-        return player, opts.stdout_result, True
+        return player, opts.stdout_result, True, None, None
 
     played = False
     while running:
@@ -188,7 +246,11 @@ def main(stdscr, args):
                 loaded, total = player.audio.loading_progress
                 safe_addstr(stdscr, 3, 2, f"Loading audio... ({loaded}/{total})")
             else:
-                safe_addstr(stdscr, 3, 2, "Audio ready.                          ")
+                err_count = len(player.audio.load_errors)
+                if err_count:
+                    safe_addstr(stdscr, 3, 2, f"Audio ready. ({err_count} file(s) failed to load)")
+                else:
+                    safe_addstr(stdscr, 3, 2, "Audio ready.                          ")
 
             if show_advanced_menu:
                 safe_addstr(stdscr, 4, 2, "=== ADVANCED OPTIONS ===", curses.A_BOLD)
@@ -231,7 +293,13 @@ def main(stdscr, args):
                     safe_addstr(stdscr, row, 2, "Press [Enter] to START PLAY"); row += 1
                 else:
                     safe_addstr(stdscr, row, 2, "[Enter] will be available after audio loads"); row += 1
-                safe_addstr(stdscr, row, 2, f"Press [{opts.quit_key_name}] to Quit")
+                safe_addstr(stdscr, row, 2, f"Press [{opts.quit_key_name}] to Quit"); row += 2
+                # 音声読み込みエラーをメニュー末尾に表示（最大3件）
+                for err in player.audio.load_errors[-3:]:
+                    for line in err.splitlines():
+                        if row < curses.LINES - 1:
+                            safe_addstr(stdscr, row, 2, line)
+                            row += 1
         else:
             if load_error_msg:
                 safe_addstr(stdscr, 2, 2, load_error_msg, curses.A_BOLD)
@@ -249,12 +317,18 @@ def main(stdscr, args):
             show_advanced_menu = not show_advanced_menu
         elif player.chart:
             if key in (10, 13) and player.is_audio_ready:  # Enter key to start play
+                if opts.display_mode == 'none':
+                    # curses を終了してから soundonly モードで再生する
+                    ae.close()
+                    return player, opts.stdout_result, False, ae, "RESTART_SOUNDONLY"
                 result = prepare_game_start(player, opts, channel_to_lane)
                 channel_to_lane = result['channel_to_lane']
                 lane_chars = result['lane_chars']
                 KEY_TO_LANE = result['KEY_TO_LANE']
 
                 on_update = make_on_update(stdscr, player, KEY_TO_LANE, opts, lane_chars)
+                stdscr.clear()
+                stdscr.refresh()
                 player.play(on_update=on_update, auto_play=opts.autoplay)
                 if not opts.autoplay and (player.is_dead or opts.show_result):
                     show_result(stdscr, player, opts.quit_key_code, display_mode=opts.display_mode)
@@ -300,7 +374,7 @@ def main(stdscr, args):
 
         time.sleep(0.05) #ここのsleepはメニュー画面での話なのでこれ(20FPS)で十分
     ae.close()
-    return player, opts.stdout_result, played
+    return player, opts.stdout_result, played, None, None
 
 from helpers.options import load_options
 
@@ -313,7 +387,9 @@ if __name__ == "__main__":
     else:
         res = curses.wrapper(main, args)
         if res:
-            player, opt_stdout_result, played = res
-            if played and opt_stdout_result and player:
+            player, opt_stdout_result, played, old_ae, restart_signal = res
+            if restart_signal == "RESTART_SOUNDONLY":
+                run_soundonly(args, preloaded_player=player, preloaded_ae=old_ae)
+            elif played and opt_stdout_result and player:
                 from helpers.stdout_result import stdout_result_stats
                 stdout_result_stats(player)

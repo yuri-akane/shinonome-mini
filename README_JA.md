@@ -303,3 +303,4 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.79 長尺wav（1分以上の1本wav等）の再生を若干改善、画面描画オフセット(note_display_offset_ms)設定追加(オーディオバッファが大きい環境向け)
 - 1.80 MixWaver Modeの改善
 - 1.81 MixWaver Modeの改善（特にギミック譜面） (bpm>basebpm*100 or bpm>10000で振る舞いが変わるようにしました)、bmsfd.pyの操作性改善(pgdn/pgup/home/end)
+- 1.81e soundonly（曲視聴のみ）modeのdebug

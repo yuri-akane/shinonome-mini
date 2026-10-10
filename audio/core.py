@@ -24,6 +24,9 @@ class AudioEngine:
         self._loaded_count = 0
         self._total_count = 0
 
+        # 音声読み込みエラーのログ（curses 上で表示するために print の代わりに蓄積）
+        self.load_errors = []
+
         # settings.toml からオーディオ設定を読み込む
         opts = load_options()
         self.sample_rate = opts.sample_rate
@@ -157,18 +160,23 @@ class AudioEngine:
             self.sounds[sound_id] = sound
             return True
         except Exception as e:
-            # デバッグ用にログを出力
-            print(f"Error loading {file_path}: {e}")
+            # curses 表示のために print せずリストに蓄積する
+            basename = os.path.basename(file_path)
+            self.load_errors.append(
+                f"[Audio Load Error]\n  File  : {basename}\n  Reason: {e}"
+            )
             return False
 
     def load_wav_table(self, wav_table, base_path):
         """BMSのWAVテーブルに基づいて音源を一括ロードする（同期版）"""
         for sound_id, file_name in wav_table.items():
             resolved_path = resolve_audio_path(base_path, file_name)
-            if resolved_path and self.load_sound(sound_id, resolved_path):
-                pass
+            if not resolved_path:
+                self.load_errors.append(
+                    f"[Audio Warning]\n  ID    : {sound_id}\n  Reason: File not found: {file_name}"
+                )
             else:
-                print(f"Warning: Failed to load {sound_id} ({file_name})")
+                self.load_sound(sound_id, resolved_path)
 
     def load_wav_table_async(self, wav_table, base_path, on_done=None):
         """BMSのWAVテーブルに基づいて音源をバックグラウンドスレッドでロードする。

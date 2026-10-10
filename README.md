@@ -299,3 +299,4 @@ normal gauge.
 - 1.79 improve audio play with wav over 1 min, add "note_display_offset_ms" to settings.toml for huge audio buffer environment.
 - 1.80 improve MixWaver Mode
 - 1.81 improve MixWaver Mode with gimmick bms (behavior changes if bpm>basebpm*100 or bpm>10000), improved usability of bmsfd.py(pgdn/pgup/home/end)
+- 1.81e debug soundonly mode

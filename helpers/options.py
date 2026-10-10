@@ -125,7 +125,7 @@ class Options:
     hispeed: float = 1.0
 
     def toggle_display_mode(self) -> None:
-        modes = ["mini", "tiny", "mw"]
+        modes = ["mini", "tiny", "mw", "none"]
         if self.display_mode not in modes:
             self.display_mode = "mini"
         else:
