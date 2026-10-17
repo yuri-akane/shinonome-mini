@@ -103,8 +103,10 @@ class BaseRenderer:
     def calculate_scale_and_state(self, player, draw_time, initial_bpm, opts, base_speed=22.0):
         """Calculate scale, player_height, and current_bpm from timeline or fallback using draw_time."""
         speed = base_speed * opts.hispeed
+        init_bpm = getattr(player, 'initial_bpm', initial_bpm)
+        effective_init_bpm = abs(init_bpm) if init_bpm != 0 else 120.0
         if getattr(player, 'timeline', None):
-            beat_duration = 60.0 / player.initial_bpm
+            beat_duration = 60.0 / effective_init_bpm
             scale = speed * beat_duration
             _, player_height, current_bpm, _ = player.timeline.get_state(draw_time)
         else:

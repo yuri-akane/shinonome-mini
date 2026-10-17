@@ -93,8 +93,8 @@ def calculate_event_times(events: list[dict[str, Any]], initial_bpm: float) -> N
         ev_beat = ev["beat"]
         delta_beat = ev_beat - prev_beat
         if delta_beat > 0:
-            #逐次足しているので誤差が蓄積しうる処理
-            current_sec += delta_beat * (60.0 / current_bpm)
+            effective_bpm = abs(current_bpm) if current_bpm != 0 else 120.0
+            current_sec += delta_beat * (60.0 / effective_bpm)
 
         ev["time"] = current_sec
 
@@ -104,8 +104,7 @@ def calculate_event_times(events: list[dict[str, Any]], initial_bpm: float) -> N
 
         # Apply STOP
         if "stop" in ev:
-            #逐次足しているので誤差が蓄積しうる処理
-            stop_sec = stop_seconds(ev["stop"], current_bpm)
+            stop_sec = stop_seconds(ev["stop"], abs(current_bpm) if current_bpm != 0 else 120.0)
             current_sec += stop_sec
 
         prev_beat = ev_beat

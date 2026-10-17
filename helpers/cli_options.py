@@ -51,6 +51,7 @@ def parse_args() -> argparse.Namespace:
         display_mode (str)      : 'mini' | 'tiny' | 'mw' | 'soundonly'  (default 'mini')
         nomenu (bool)           : --nomenu
         force_mode (str|None)   : normalized game mode string, e.g. '7K'
+        hispeed (float|None)    : --hispeed / --hs
     """
     parser = argparse.ArgumentParser(
         description='Shinonome-Mini -- Minimal Console BMS Player',
@@ -78,6 +79,10 @@ def parse_args() -> argparse.Namespace:
     _add_on_off_argument(parser, ('-s', '--autoscratch'), 'autoscratch', 'Force AUTO SCRATCH on/off')
     _add_on_off_argument(parser, ('--show-result',), 'show_result', 'Force show result screen on/off')
     _add_on_off_argument(parser, ('--stats',), 'stats', 'Output performance stats to stdout upon song completion')
+
+    # --- Hi-Speed ---
+    parser.add_argument('--hispeed', '--hs', dest='hispeed', type=float, default=None,
+                        help='Hi-speed multiplier (0.0 < hs <= 100.0)')
 
     # --- Display mode (mutually exclusive) ---
     disp = parser.add_mutually_exclusive_group()
@@ -156,5 +161,14 @@ def parse_args() -> argparse.Namespace:
     # soundonly / none implies autoplay
     if args.display_mode in ('soundonly', 'none'):
         args.autoplay = True
+
+    # Validate hispeed: abs(hs), check 0.0 < hs <= 100.0, fallback to None if invalid
+    if args.hispeed is not None:
+        hs = abs(args.hispeed)
+        if 0.0 < hs <= 100.0:
+            args.hispeed = hs
+        else:
+            print(f"Warning: Invalid hispeed '{args.hispeed}' (must be 0.0 < hispeed <= 100.0), ignoring", file=sys.stderr)
+            args.hispeed = None
 
     return args

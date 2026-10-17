@@ -485,6 +485,8 @@ def load_options(args: argparse.Namespace | None = None, settings_path: str = "s
             opts.nomenu = True
         if getattr(args, 'force_mode', None) is not None:
             opts.force_mode = args.force_mode
+        if getattr(args, 'hispeed', None) is not None:
+            opts.hispeed = float(args.hispeed)
 
     # Forced autoplay if soundonly/none
     if opts.display_mode in ('soundonly', 'none'):

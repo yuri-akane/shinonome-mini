@@ -96,7 +96,8 @@ class BpmTimeline:
             mult = self._get_measure_multiplier(b_start)
             
             delta_beat = b_end - b_start
-            delta_time = delta_beat * (60.0 / curr_bpm)
+            effective_bpm = abs(curr_bpm) if curr_bpm != 0 else 120.0
+            delta_time = delta_beat * (60.0 / effective_bpm)
             delta_height = delta_beat * curr_scroll
             
             # Add normal segment
@@ -125,7 +126,8 @@ class BpmTimeline:
                     curr_bpm = bpm_map[b_end]
                 if b_end in scroll_map:
                     curr_scroll = scroll_map[b_end]
-                stop_time = stop_seconds(stop_map[b_end], curr_bpm)
+                effective_stop_bpm = abs(curr_bpm) if curr_bpm != 0 else 120.0
+                stop_time = stop_seconds(stop_map[b_end], effective_stop_bpm)
 
                 stop_seg = TimelineSegment(
                     start_time=curr_time,

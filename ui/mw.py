@@ -31,6 +31,7 @@ class MwRenderer(BaseRenderer):
         self.last_active_pane: str = 'upper'        # 前フレームの正常active_pane（凍結先決定用）
         self.last_start_beat_upper: float = 0.0     # 前フレームのUpper小節開始ビート
         self.last_start_beat_lower: float = 0.0     # 前フレームのLower小節開始ビート
+        self.last_bpm_sign: int = 1                 # 前フレームのBPM符号 (+1 or -1)
 
 
     def _render_pane(self, stdscr, pane_title: str, start_y: int, start_beat: float, beats_per_window: float,
@@ -38,7 +39,7 @@ class MwRenderer(BaseRenderer):
                      events: list, event_index: int, player, lane_chars, opts, max_y: int, max_x: int,
                      key_names: list = None, use_fixed_judge: bool = False,
                      flipbook_partner_pane: bool = False, partner_offset_beats: float = 0.0,
-                     visual_beat_offset: float = 0.0):
+                     visual_beat_offset: float = 0.0, is_reverse_bpm: bool = False):
 
         end_beat = start_beat + beats_per_window
         dp_offset = 1 if (self.is_dp and self.half > 0) else 0
@@ -85,9 +86,21 @@ class MwRenderer(BaseRenderer):
             judge_x = self.frozen_judge_x
         else:
             judge_rel_beat = max(0.0, min(beats_per_window, current_beat - start_beat))
-            judge_x = self.lane_x + int(round(judge_rel_beat * beat_width))
+            if is_reverse_bpm:
+                # 負BPM時は右端から左端へ進行
+                judge_x = self.lane_x + track_width - 1 - int(round(judge_rel_beat * beat_width))
+            else:
+                # 正BPM時は左端から右端へ進行
+                judge_x = self.lane_x + int(round(judge_rel_beat * beat_width))
             if is_active:
                 self.last_judge_x = judge_x
+
+        # Helper: beatからX座標を算出（is_reverse_bpm対応）
+        def calc_x_from_disp_beat(d_beat: float) -> int:
+            if is_reverse_bpm:
+                return self.lane_x + track_width - 1 - int(round((d_beat - start_beat) * beat_width))
+            else:
+                return self.lane_x + int(round((d_beat - start_beat) * beat_width))
 
         # Draw Measure Lines
         show_m_lines = getattr(opts, 'show_measure_lines', True) if opts else True
@@ -114,9 +127,11 @@ class MwRenderer(BaseRenderer):
                     if disp_m_beat >= end_beat + 1.0:
                         break
                     if start_beat <= disp_m_beat < end_beat:
-                        m_x = self.lane_x + int(round((disp_m_beat - start_beat) * beat_width))
+                        m_x = calc_x_from_disp_beat(disp_m_beat)
                     else:
                         continue
+
+                m_x = max(self.lane_x, min(m_x, self.lane_x + track_width - 1))
 
                 if self.lane_x <= m_x < self.lane_x + track_width:
                     for idx in range(self.lane_count):
@@ -156,16 +171,25 @@ class MwRenderer(BaseRenderer):
                 if disp_ev_beat >= end_beat + 1.0:
                     break
                 if start_beat <= disp_ev_beat < end_beat:
-                    note_x = self.lane_x + int(round((disp_ev_beat - start_beat) * beat_width))
+                    note_x = calc_x_from_disp_beat(disp_ev_beat)
                 else:
                     continue
+
+            note_x = max(self.lane_x, min(note_x, self.lane_x + track_width - 1))
 
             if not (self.lane_x <= note_x < self.lane_x + track_width):
                 continue
 
             # MW: 判定ラインを通過した位置のノートは非表示（アクティブペインのみ）
-            if is_active and note_x < judge_x:
-                continue
+            # 正BPM時: 左から右へ進むため note_x < judge_x が通過済み
+            # 負BPM時: 右から左へ進むため note_x > judge_x が通過済み
+            # （切り替わり時は判定ラインが通り過ぎるまでは切り替わり前のノーツが表示され、
+            #   通り過ぎると通過済みとなって非表示または切り替わり後のノーツが表示される）
+            if is_active:
+                if is_reverse_bpm and note_x > judge_x:
+                    continue
+                elif not is_reverse_bpm and note_x < judge_x:
+                    continue
 
             offset = 1 if (self.is_dp and self.half > 0 and lane_idx >= self.half) else 0
             row_y = start_y + 1 + lane_idx + offset
@@ -227,15 +251,27 @@ class MwRenderer(BaseRenderer):
             else:
                 disp_s_beat = s_beat - visual_beat_offset
                 disp_e_beat = e_beat - visual_beat_offset
-                x_start_ln = self.lane_x + int(round(max(0.0, disp_s_beat - start_beat) * beat_width))
-                x_end_ln   = self.lane_x + int(round(min(beats_per_window, disp_e_beat - start_beat) * beat_width))
+                if is_reverse_bpm:
+                    x_start_ln = self.lane_x + track_width - 1 - int(round(max(0.0, disp_s_beat - start_beat) * beat_width))
+                    x_end_ln   = self.lane_x + track_width - 1 - int(round(min(beats_per_window, disp_e_beat - start_beat) * beat_width))
+                else:
+                    x_start_ln = self.lane_x + int(round(max(0.0, disp_s_beat - start_beat) * beat_width))
+                    x_end_ln   = self.lane_x + int(round(min(beats_per_window, disp_e_beat - start_beat) * beat_width))
+
+            x_start_ln = max(self.lane_x, min(x_start_ln, self.lane_x + track_width - 1))
+            x_end_ln   = max(self.lane_x, min(x_end_ln, self.lane_x + track_width - 1))
 
             # トラック領域内に収まる範囲でボディ描画
-            draw_body_start = max(self.lane_x, x_start_ln + 1)
-            draw_body_end = min(self.lane_x + track_width, x_end_ln)
+            body_left = min(x_start_ln, x_end_ln)
+            body_right = max(x_start_ln, x_end_ln)
+            draw_body_start = max(self.lane_x, body_left + 1)
+            draw_body_end = min(self.lane_x + track_width, body_right)
             # MW: 判定ライン通過済みのLNボディは非表示（アクティブペインのみ）
             if is_active:
-                draw_body_start = max(draw_body_start, judge_x + 1)
+                if is_reverse_bpm:
+                    draw_body_end = min(draw_body_end, judge_x)
+                else:
+                    draw_body_start = max(draw_body_start, judge_x + 1)
             for x_b in range(draw_body_start, draw_body_end):
                 self.safe_addstr(stdscr, row_y, x_b, "=", curses.A_BOLD if (is_active or use_fixed_judge) else curses.A_NORMAL)
 
@@ -253,7 +289,8 @@ class MwRenderer(BaseRenderer):
             if show_head:
                 if self.lane_x <= x_start_ln < self.lane_x + track_width:
                     # MW: 判定ライン通過済みのLNヘッドは非表示（アクティブペインのみ）
-                    if not (is_active and x_start_ln < judge_x):
+                    passed = (x_start_ln > judge_x) if is_reverse_bpm else (x_start_ln < judge_x)
+                    if not (is_active and passed):
                         self.safe_addstr(stdscr, row_y, x_start_ln, head_char, curses.A_BOLD if (is_active or use_fixed_judge) else curses.A_NORMAL)
 
             show_tail = use_fixed_judge or (start_beat <= disp_e < end_beat)
@@ -303,6 +340,18 @@ class MwRenderer(BaseRenderer):
         beat_width = max(1.0, track_width / beats_per_window)
 
         current_beat = player_height
+
+        # BPMの正負切り替え（反転）検出
+        current_bpm_sign = -1 if current_bpm < 0 else 1
+        if self.last_bpm_sign != current_bpm_sign and self.last_time_sec is not None:
+            # 切り替わり前の表示beatにおけるウィンドウ内位置（進行度）
+            old_display_beat = current_beat - self.visual_beat_offset
+            rel_in_window = old_display_beat % beats_per_window
+            # 正負反転時に judge_x が跳ばないよう、ウィンドウ内の進行度を (beats_per_window - rel) に折り返す
+            # 新しい offset を加減算して、(current_beat - new_offset) % beats_per_window == beats_per_window - rel_in_window となるように調整
+            delta_offset = 2.0 * rel_in_window - beats_per_window
+            self.visual_beat_offset += delta_offset
+
         display_beat = current_beat - self.visual_beat_offset
 
         # --- 判定ライン移動速度および高速BPMギミック検出 ---
@@ -319,11 +368,13 @@ class MwRenderer(BaseRenderer):
         is_high_bpm = (seg_bpm >= _init_bpm * 100.0 or seg_bpm >= 10000.0)
 
         # 2. 1フレームあたりの変化速度判定（急激な変化）
+        # ※ BPM符号反転による折り返しは正常な方向転換なのでジャンプ検出から除外
         dt = (draw_time - self.last_time_sec) if self.last_time_sec is not None else 0.0
         delta_beat = abs(current_beat - self.last_current_beat) if self.last_time_sec is not None else 0.0
         delta_judge_px = delta_beat * beat_width
         speed_threshold_px = max(10.0, track_width * 0.25)
-        is_fast_jump = (delta_judge_px >= speed_threshold_px) or (delta_beat >= beats_per_window * 0.4)
+        bpm_switched = (self.last_bpm_sign != current_bpm_sign)
+        is_fast_jump = not bpm_switched and ((delta_judge_px >= speed_threshold_px) or (delta_beat >= beats_per_window * 0.4))
 
         # どちらかを満たすか、あるいは一度凍結された後で急変状態が収まるまではギミックモードを維持
         use_fixed_judge = is_high_bpm or is_fast_jump or (self.frozen_active_pane is not None and is_high_bpm)
@@ -395,7 +446,8 @@ class MwRenderer(BaseRenderer):
                           key_names=key_names, use_fixed_judge=use_fixed_judge,
                           flipbook_partner_pane=upper_flipbook_partner,
                           partner_offset_beats=beats_per_window,
-                          visual_beat_offset=self.visual_beat_offset)
+                          visual_beat_offset=self.visual_beat_offset,
+                          is_reverse_bpm=(current_bpm < 0))
 
         # Render Lower Pane
         lower_start_y = upper_start_y + 2 + self.lane_count + dp_extra
@@ -409,7 +461,8 @@ class MwRenderer(BaseRenderer):
                           key_names=key_names, use_fixed_judge=use_fixed_judge,
                           flipbook_partner_pane=lower_flipbook_partner,
                           partner_offset_beats=beats_per_window,
-                          visual_beat_offset=self.visual_beat_offset)
+                          visual_beat_offset=self.visual_beat_offset,
+                          is_reverse_bpm=(current_bpm < 0))
 
         # Footer Stats & Judgement Display
         footer_y = lower_start_y + 2 + self.lane_count + dp_extra
@@ -430,6 +483,7 @@ class MwRenderer(BaseRenderer):
             self.last_start_beat_lower = start_beat_lower
         self.last_current_beat = current_beat
         self.last_time_sec = draw_time
+        self.last_bpm_sign = current_bpm_sign
 
         # Handle Keyboard & Input Loop
         self.process_input(stdscr, player, auto_play, opts, key_to_lane, use_pynput, get_key_events)

@@ -37,20 +37,33 @@ class MiniRenderer(BaseRenderer):
         draw_time = self.get_draw_time(current_time, opts)
         scale, player_height, current_bpm = self.calculate_scale_and_state(player, draw_time, initial_bpm, opts)
 
+        is_reverse_bpm = (current_bpm < 0)
+
         self.safe_addstr(stdscr, 0, 2, "Shinonome-Mini -- Minimal Console BMS Player", curses.A_BOLD)
         self.safe_addstr(stdscr, 1, 2, f"Song: {player.chart['info'].get('title', '___')} / Artist: {player.chart['info'].get('artist', '___')}")
         self.safe_addstr(stdscr, 2, 2, f"BPM: {current_bpm:.1f} | Time: {draw_time:.2f}s | HS: {opts.hispeed:.1f}")
 
-        for y in range(self.start_y, self.judgement_y):
+        if is_reverse_bpm:
+            judge_y = self.start_y
+            lane_top = self.start_y + 1
+            lane_bottom = self.judgement_y + 1  # range(lane_top, lane_bottom) gives same height
+            key_name_y = self.start_y - 1
+        else:
+            judge_y = self.judgement_y
+            lane_top = self.start_y
+            lane_bottom = self.judgement_y
+            key_name_y = self.judgement_y + 1
+
+        for y in range(lane_top, lane_bottom):
             self.safe_addstr(stdscr, y, self.lane_x, self.LANE_UNIT)
 
-        self.safe_addstr(stdscr, self.judgement_y, self.lane_x, self.JUDGE_UNIT)
+        self.safe_addstr(stdscr, judge_y, self.lane_x, self.JUDGE_UNIT)
 
         for idx, name in enumerate(key_names):
             lane_idx = idx
             is_active = (current_time - player.key_pressed_time[lane_idx] < 0.12)
             attr = curses.A_REVERSE if is_active else curses.A_NORMAL
-            self.safe_addstr(stdscr, self.judgement_y + 1, self.lane_posx(lane_idx), name, attr)
+            self.safe_addstr(stdscr, key_name_y, self.lane_posx(lane_idx), name, attr)
 
         if auto_play:
             self.safe_addstr(stdscr, self.judgement_y + 2, self.lane_x, "[       AUTOPLAY MODE ACTIVE       ]", curses.A_DIM)
@@ -117,6 +130,20 @@ class MiniRenderer(BaseRenderer):
 
         draw_start_idx = self.get_draw_start_index(events, draw_time)
 
+        def calc_event_y(ev):
+            if is_reverse_bpm:
+                target_seconds = ev['time']
+                if getattr(player, 'timeline', None):
+                    note_height = player.timeline.get_height_at_beat(ev['beat'])
+                else:
+                    note_height = target_seconds
+                # When moving upwards toward judge_y (at start_y), future notes (note_height > player_height)
+                # are placed below judge_y (y > judge_y) and move up as player_height increases.
+                y_calc = judge_y + int((note_height - player_height) * abs(scale))
+                return y_calc, target_seconds
+            else:
+                return self.calculate_y(ev, player, judge_y, player_height, scale)
+
         # Draw measure lines (Background layer)
         if getattr(player, 'show_measure_lines', True):
             for i in range(draw_start_idx, len(events)):
@@ -124,9 +151,12 @@ class MiniRenderer(BaseRenderer):
                 if event.get('channel') != 'measure_line':
                     continue
 
-                y, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
-                if y < 0: break
-                if self.start_y <= y < self.judgement_y:
+                y, _ = calc_event_y(event)
+                if not is_reverse_bpm and scale >= 0 and y < 0:
+                    break
+                if (is_reverse_bpm or scale < 0) and y > curses.LINES:
+                    break
+                if lane_top <= y < lane_bottom:
                     self.safe_addstr(stdscr, y, self.lane_x, self.JUDGE_UNIT, curses.A_DIM)
 
         # Draw long note bodies (Foreground layer1)
@@ -146,24 +176,30 @@ class MiniRenderer(BaseRenderer):
             if not start_ev:
                 continue
 
-            y_end, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
+            y_end, _ = calc_event_y(event)
 
             if start_ev.get('manual_hit') or (draw_time >= start_ev.get('time', 0.0)):
-                y_start = self.judgement_y
+                y_start = judge_y
             else:
-                y_start, _ = self.calculate_y(start_ev, player, self.judgement_y, player_height, scale)
+                y_start, _ = calc_event_y(start_ev)
                 
             note_str = lane_chars[lane_idx]
             x = self.lane_posx(lane_idx)
 
-            if not start_ev.get('manual_hit') and draw_time < start_ev.get('time', 0.0) and self.start_y <= y_start < self.judgement_y:
+            if not start_ev.get('manual_hit') and draw_time < start_ev.get('time', 0.0) and lane_top <= y_start < lane_bottom:
                 self.safe_addstr(stdscr, y_start, x, note_str)
-            if self.start_y <= y_end < self.judgement_y:
+            if lane_top <= y_end < lane_bottom:
                 if opts.show_ln_end_head:
                     self.safe_addstr(stdscr, y_end, x, note_str)
                 else:
                     self.safe_addstr(stdscr, y_end, x, " |")
-            for y_body in range(max(self.start_y, y_end + 1), min(self.judgement_y, y_start)):
+
+            # Handle body rendering regardless of whether y_end <= y_start or y_start <= y_end
+            body_top = min(y_start, y_end)
+            body_bottom = max(y_start, y_end)
+            draw_top = max(lane_top, body_top + 1)
+            draw_bottom = min(lane_bottom, body_bottom)
+            for y_body in range(draw_top, draw_bottom):
                 self.safe_addstr(stdscr, y_body, x, " |")
 
         # Draw notes (Foreground layer2)
@@ -184,28 +220,31 @@ class MiniRenderer(BaseRenderer):
             if lane_idx is None:
                 continue
 
-            y, target_seconds = self.calculate_y(event, player, self.judgement_y, player_height, scale)
-            if y < 0: break
+            y, target_seconds = calc_event_y(event)
+            if not is_reverse_bpm and scale >= 0 and y < 0:
+                break
+            if (is_reverse_bpm or scale < 0) and y > curses.LINES:
+                break
 
             note_str = "M!" if event.get('is_mine') else lane_chars[lane_idx]
             note_attr = curses.A_REVERSE if event.get('is_mine') else curses.A_NORMAL
             x_pos = self.lane_posx(lane_idx)
 
-            if self.start_y <= y < self.judgement_y:
+            if lane_top <= y < lane_bottom:
                 self.safe_addstr(stdscr, y, x_pos, note_str, note_attr)
-            elif y >= self.judgement_y:
-                if draw_time - target_seconds < 0.08:
-                    self.safe_addstr(stdscr, self.judgement_y, x_pos, "FL", curses.A_REVERSE)
+            elif (is_reverse_bpm and y <= judge_y) or (not is_reverse_bpm and ((scale >= 0 and y >= judge_y) or (scale < 0 and y <= judge_y))):
+                if not event.get('is_mine') and (draw_time - target_seconds < 0.08):
+                    self.safe_addstr(stdscr, judge_y, x_pos, "FL", curses.A_REVERSE)
 
-        beat_seconds = 60.0 / initial_bpm
+        beat_seconds = 60.0 / abs(initial_bpm) if initial_bpm != 0 else 0.5
         beat_number = int(draw_time / beat_seconds)
         if beat_number % 2 == 0:
-            self.safe_addstr(stdscr, self.judgement_y, self.lane_x - 2, "*", curses.A_BOLD)
+            self.safe_addstr(stdscr, judge_y, self.lane_x - 2, "*", curses.A_BOLD)
         else:
-            self.safe_addstr(stdscr, self.judgement_y, self.lane_x - 2, " ")
+            self.safe_addstr(stdscr, judge_y, self.lane_x - 2, " ")
         rotation_symbols = ["|", "/", "-", "\\"]
         half_beat_number = int(draw_time / (beat_seconds * 0.5))
         rot_char = rotation_symbols[half_beat_number % 4]
-        self.safe_addstr(stdscr, self.judgement_y + 1, self.lane_x - 2, rot_char, curses.A_BOLD)
+        self.safe_addstr(stdscr, judge_y + 1 if not is_reverse_bpm else judge_y - 1, self.lane_x - 2, rot_char, curses.A_BOLD)
 
         self.process_input(stdscr, player, auto_play, opts, key_to_lane, use_pynput, get_key_events)

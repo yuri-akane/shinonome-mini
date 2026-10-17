@@ -189,6 +189,7 @@ Shinonome-Mini -- Minimal Console BMS Player
 --stats [on|off]
 --mw # Mixwaver Mode
 --scan # alias --mw
+--hispeed value, --hs value (value:0.0-100.0 float)
 ```
 ## Notes & Caveats
 - The UI is terminal‑only; no graphical interface.
@@ -222,21 +223,15 @@ normal gauge.
 - Thanks deeply to the original [shinonome](https://github.com/kuroclef/shinonome) author.
 - Although this is a completely different project, it borrows the core concept, hence the "-mini" suffix.
 
-## future support
-- to ver2.00
-   - implement bmsfd.py to be able to call other viewers and players(ok?)
-- to ver2.50
-   - mixwaver-mode(ok?)
-   - minus BPM?
-
 ## this program doesn't support:
 - movie or image (BMP, BGA)
 - hidden/sudden, S-RAN/H-RAN/R-RAN, FLIP(DP), etc
 - score/file output
 - IR or network connection
 - ZZ mine, invisible notes, FREEZONE
-- minus BPM, minus SCROLL, gravity, reverse flow
-   - minus SCROLL may be done, but not fully tested
+- specialized way of notes flow (acceleration, decceleration, reverse, unstable speed, etc)
+   - minus BPM and minus SCROLL may be done, but not be fully tested
+   - it is not compatible with other players with minus BPM.
 - midi
 - mp3 may cause delay, same as other players.
 - preview
@@ -300,3 +295,6 @@ normal gauge.
 - 1.80 improve MixWaver Mode
 - 1.81 improve MixWaver Mode with gimmick bms (behavior changes if bpm>basebpm*100 or bpm>10000), improved usability of bmsfd.py(pgdn/pgup/home/end)
 - 1.81e debug soundonly mode
+- 1.81f debug MixWaver Mode (notes were not visible at the edge of pane）
+- 1.82 minus BPM, --hispeed cmdline option
+- 1.83 add tips

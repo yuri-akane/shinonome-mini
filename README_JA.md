@@ -192,6 +192,7 @@ Shinonome-Mini -- Minimal Console BMS Player
 --stats [on|off]
 --mw #Mixwaver Mode
 --scan # --mwと同じ
+--hispeed value, --hs value (value: 0.0-100.0 float)
 ```
 ## Notes & Caveats
 - UIはterminalだけです。グラフィカルUIはありません。
@@ -224,22 +225,15 @@ Shinonome-Mini -- Minimal Console BMS Player
 - こちらのプロジェクト [shinonome](https://github.com/kuroclef/shinonome) の作者様に感謝を申し上げます。
 - 全く別物になっていますが、基本コンセプトをお借りしているので‑miniとさせていただきました。
 
-## あとでやる
-- ver2.00まで
-   - cnnm.py以外の他のbmsビューア・プレイヤーも引数で呼べるようにする(ok?)
-- ver2.50まで
-   - mixwaver-mode(ok?)
-   - マイナスBPM(?)
-
 ## minimalに保つためやらない
 - 画像・動画表示
 - hidden/sudden, S-RAN/H-RAN/R-RAN, FLIP(DP), etc
 - スコア記録・保存・送信、ファイル出力
 - IR等オンライン接続
 - ZZ（即死）地雷、不可視ノーツ、FREEZONE
-- マイナスBPM、負のSCROLL, gravity, reverse flow
-   - 負のSCROLL（ノーツの逆流）は譜面によっては動作することを確認しています。
-   - 私が十分な量の#SCROLL(bms)やscroll_event(bmson)を使ったbmsを持っていないので仮対応です。
+- 特殊なノーツの落ち方（加速、減速、逆流、ゆらゆら、など）
+   - マイナスBPMと負のSCROLL（逆流）はある程度は動作確認しています。
+   - マイナスBPMは独自実装で、他のプレイヤーの動作と異なります。
 - midi対応
 - mp3は再生できますが音ズレがあるのでおすすめしません
 - preview
@@ -304,3 +298,6 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.80 MixWaver Modeの改善
 - 1.81 MixWaver Modeの改善（特にギミック譜面） (bpm>basebpm*100 or bpm>10000で振る舞いが変わるようにしました)、bmsfd.pyの操作性改善(pgdn/pgup/home/end)
 - 1.81e soundonly（曲視聴のみ）modeのdebug
+- 1.81f debug MixWaver Mode (pane端のノーツが表示されないことがあった）
+- 1.82 マイナスBPM, --hispeed cmdline option
+- 1.83 tips追加

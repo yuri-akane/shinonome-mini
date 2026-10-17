@@ -28,7 +28,18 @@ class TinyRenderer(BaseRenderer):
 
     def render(self, stdscr, player, current_time, events, event_index, initial_bpm, resolution, auto_play, opts, key_names, lane_chars, key_to_lane, use_pynput, get_key_events):
         draw_time = self.get_draw_time(current_time, opts)
-        scale, player_height, _ = self.calculate_scale_and_state(player, draw_time, initial_bpm, opts)
+        scale, player_height, current_bpm = self.calculate_scale_and_state(player, draw_time, initial_bpm, opts)
+
+        is_reverse_bpm = (current_bpm < 0)
+
+        if is_reverse_bpm:
+            judge_y = self.start_y
+            lane_top = self.start_y + 1
+            lane_bottom = self.judgement_y + 1
+        else:
+            judge_y = self.judgement_y
+            lane_top = self.start_y
+            lane_bottom = self.judgement_y
 
         # Render Judgement Line as Gauge Bar
         # Gauge range 0.0 ~ 100.0 mapped across lane_count chars
@@ -45,19 +56,31 @@ class TinyRenderer(BaseRenderer):
             attr = base_gauge_attr
             if i < len(player.key_pressed_time) and (current_time - player.key_pressed_time[i] < 0.12):
                 attr ^= curses.A_REVERSE
-            self.safe_addstr(stdscr, self.judgement_y, self.lane_posx(i), char_str, attr)
+            self.safe_addstr(stdscr, judge_y, self.lane_posx(i), char_str, attr)
 
         if self.half > 0:
             sep_x = self.lane_x + self.half
-            self.safe_addstr(stdscr, self.judgement_y, sep_x, "|", base_gauge_attr)
+            self.safe_addstr(stdscr, judge_y, sep_x, "|", base_gauge_attr)
 
         # Draw 1P/2P separator '|' for double play modes (10K/14K) background lines
         if self.half > 0:
             sep_x = self.lane_x + self.half
-            for y in range(self.start_y, self.judgement_y):
+            for y in range(lane_top, lane_bottom):
                 self.safe_addstr(stdscr, y, sep_x, "|", curses.A_DIM)
 
         draw_start_idx = self.get_draw_start_index(events, draw_time)
+
+        def calc_event_y(ev):
+            if is_reverse_bpm:
+                target_seconds = ev['time']
+                if getattr(player, 'timeline', None):
+                    note_height = player.timeline.get_height_at_beat(ev['beat'])
+                else:
+                    note_height = target_seconds
+                y_calc = judge_y + int((note_height - player_height) * abs(scale))
+                return y_calc, target_seconds
+            else:
+                return self.calculate_y(ev, player, judge_y, player_height, scale)
 
         # Draw measure lines (Background layer)
         if getattr(player, 'show_measure_lines', True):
@@ -66,9 +89,12 @@ class TinyRenderer(BaseRenderer):
                 if event.get('channel') != 'measure_line':
                     continue
 
-                y, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
-                if y < 0: break
-                if self.start_y <= y < self.judgement_y:
+                y, _ = calc_event_y(event)
+                if not is_reverse_bpm and scale >= 0 and y < 0:
+                    break
+                if (is_reverse_bpm or scale < 0) and y > curses.LINES:
+                    break
+                if lane_top <= y < lane_bottom:
                     if self.half > 0:
                         m_line = "-" * self.half + "|" + "-" * (self.lane_count - self.half)
                     else:
@@ -92,28 +118,33 @@ class TinyRenderer(BaseRenderer):
             if not start_ev:
                 continue
 
-            y_end, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
+            y_end, _ = calc_event_y(event)
 
             if start_ev.get('manual_hit') or (draw_time >= start_ev.get('time', 0.0)):
-                y_start = self.judgement_y
+                y_start = judge_y
             else:
-                y_start, _ = self.calculate_y(start_ev, player, self.judgement_y, player_height, scale)
+                y_start, _ = calc_event_y(start_ev)
 
             x = self.lane_posx(lane_idx)
 
             # Head and tail rendering
-            if not start_ev.get('manual_hit') and draw_time < start_ev.get('time', 0.0) and self.start_y <= y_start < self.judgement_y:
+            if not start_ev.get('manual_hit') and draw_time < start_ev.get('time', 0.0) and lane_top <= y_start < lane_bottom:
                 note_str = lane_chars.get(lane_idx, "*") if isinstance(lane_chars, dict) else lane_chars[lane_idx]
                 head_char = note_str[0] if isinstance(note_str, str) and len(note_str) > 0 else "*"
                 self.safe_addstr(stdscr, y_start, x, head_char)
-            if self.start_y <= y_end < self.judgement_y:
+            if lane_top <= y_end < lane_bottom:
                 if opts.show_ln_end_head:
                     note_str = lane_chars.get(lane_idx, "*") if isinstance(lane_chars, dict) else lane_chars[lane_idx]
                     end_char = note_str[0] if isinstance(note_str, str) and len(note_str) > 0 else "*"
                     self.safe_addstr(stdscr, y_end, x, end_char)
                 else:
                     self.safe_addstr(stdscr, y_end, x, "|")
-            for y_body in range(max(self.start_y, y_end + 1), min(self.judgement_y, y_start)):
+
+            body_top = min(y_start, y_end)
+            body_bottom = max(y_start, y_end)
+            draw_top = max(lane_top, body_top + 1)
+            draw_bottom = min(lane_bottom, body_bottom)
+            for y_body in range(draw_top, draw_bottom):
                 self.safe_addstr(stdscr, y_body, x, "|")
 
         # Draw notes (Foreground layer2)
@@ -134,8 +165,11 @@ class TinyRenderer(BaseRenderer):
             if lane_idx is None:
                 continue
 
-            y, _ = self.calculate_y(event, player, self.judgement_y, player_height, scale)
-            if y < 0: break
+            y, _ = calc_event_y(event)
+            if not is_reverse_bpm and scale >= 0 and y < 0:
+                break
+            if (is_reverse_bpm or scale < 0) and y > curses.LINES:
+                break
 
             if event.get('is_mine'):
                 note_str = "!"
@@ -148,7 +182,7 @@ class TinyRenderer(BaseRenderer):
 
             x_pos = self.lane_posx(lane_idx)
 
-            if self.start_y <= y < self.judgement_y:
+            if lane_top <= y < lane_bottom:
                 self.safe_addstr(stdscr, y, x_pos, note_str, note_attr)
 
         self.process_input(stdscr, player, auto_play, opts, key_to_lane, use_pynput, get_key_events)
