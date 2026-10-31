@@ -1,12 +1,5 @@
 # control.py - modular handling of BPM and measure-length changes for Shinonome-Mini
-# 作成はしたが、process_control_event()以外は使われていない。
-# process_control_event()は別のモジュールに移管して、それ以外はモジュールごと削除。
 """Utility functions for processing control‑type events during playback.
-
-The parser already tags control events with the keys:
-* ``bpm`` – a numeric BPM value (float)
-* ``measure_mult`` – a multiplier that changes the visual scroll speed and
-  the length of future measures.
 
 These functions are deliberately tiny so they can be edited or extended
 independently of the main ``Player`` class.  The ``Player`` class now imports

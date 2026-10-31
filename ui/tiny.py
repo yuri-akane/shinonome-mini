@@ -13,13 +13,7 @@ class TinyRenderer(BaseRenderer):
     """
 
     def __init__(self, mode: str, judgement_y_config: int = 7, lane_x: int = 1, start_y: int = 0):
-        self.mode = mode.upper()
-        self.is_dp = (self.mode in ('10K', '14K'))
-        self.lane_x = lane_x
-        self.start_y = start_y
-        self.judgement_y = judgement_y_config
-
-        self.lane_count, self.half = lane_info(self.mode)
+        super().__init__(mode, judgement_y_config, lane_x, start_y)
 
     def lane_posx(self, lane_idx: int) -> int:
         if self.half > 0 and lane_idx >= self.half:

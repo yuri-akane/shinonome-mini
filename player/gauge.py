@@ -1,4 +1,5 @@
 # player/gauge.py - ゲージ管理・追跡モジュール
+from helpers.total import estimated_total
 
 def _hard_gauge_loss(gauge, is_miss: bool) -> float:
     """HARDゲージのBAD/MISS時ゲージ減少量を計算する（負の値を返す）。
@@ -68,6 +69,28 @@ def update_gauge(player, new_gauge: float):
     else:
         player.max_gauge = max(player.max_gauge, new_gauge)
 
+def get_gauge_increment(total_playable: int, total: float, is_bmson: bool = False) -> float:
+    """#TOTAL命令に基づき、ノーツ1つあたりのゲージ増加量を動的計算する
+
+    BMS: #TOTAL は「全ノーツをPERFECTで叩いたときのゲージ増加量合計(%)」の絶対値。
+         increment = total / note_count
+    bmson: total は「デフォルトレートに対する相対乗数」(デフォルト=100)。
+         increment = estimated_total(note_count) * (total / 100) / note_count
+    """
+    total_playable = max(1, total_playable)
+
+    if is_bmson:
+        # bmson: total は相対値(デフォルト=100)。標準TOTAL値をestimated_total()で算出する。
+        if total is None or total < 0:
+            total = 100.0  # デフォルト値
+        base = estimated_total(total_playable)
+        # PERFECT/GREAT時の増加量 = デフォルトレート × 相対乗数
+        return base * (float(total) / 100.0) / total_playable
+    else:
+        # BMS: total は絶対値（全PERFECT時のゲージ増加量合計%）
+        # PERFECT/GREAT時の増加量 (総ノーツを全てPERFECT/GREATで叩いたときにTOTAL%増えるようにする)
+        return float(total) / total_playable
+
 def set_gauge_increment(inc, hard_mode):
     # モード別のゲージ増加倍率を決定
     # solid_gaugeは現在のgauge依存なので別に定義する
@@ -77,3 +100,7 @@ def set_gauge_increment(inc, hard_mode):
     else:
         # easyゲージと通常ゲージ: 通常の回復量
         return inc, inc, inc * 0.5
+
+def get_auto_scratch_gauge_increment(inc: float) -> float:
+    """オートスクラッチ時のスクラッチノーツゲージ増加量（通常の1/2）"""
+    return inc / 2.0

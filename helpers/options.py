@@ -152,6 +152,7 @@ class Options:
 
     # BMS
     bms_encoding: str = "cp932"
+    filter_duplicate_01: bool = True
 
     # Modifiers
     use_pynput: bool = True
@@ -446,6 +447,8 @@ def load_options(args: argparse.Namespace | None = None, settings_path: str = "s
         opts.bms_encoding = 'cp949'
     elif raw_enc in ('utf_8', 'utf8'):
         opts.bms_encoding = 'utf-8'
+    if 'filter_duplicate_01' in bms_cfg:
+        opts.filter_duplicate_01 = bool(bms_cfg['filter_duplicate_01'])
 
     # Modifiers section
     mod_cfg = toml_data.get('modifiers', {})

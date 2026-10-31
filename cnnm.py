@@ -15,6 +15,7 @@ from player.core import Player
 from helpers.load_initial_settings import load_initial_settings
 from helpers.prepare_game_start import prepare_game_start
 from helpers.cli_options import parse_args
+from helpers.options import load_options
 
 from player.on_update import make_on_update
 from ui.result import show_result
@@ -50,86 +51,59 @@ def run_soundonly(args, preloaded_player=None, preloaded_ae=None):
             ae._loaded_count = preloaded_ae._loaded_count
             ae._total_count = preloaded_ae._total_count
         player.audio = ae  # player が新しい ae を使うよう差し替え
+    else:
+        # --- CLI --soundonly パス（従来通り） ---
+        if not args.bmsfile:
+            print('Error: Please specify a BMS file as an argument.')
+            print('Example: python3 cnnm.py path/to/song.bms --soundonly')
+            sys.exit(1)
 
-        title = sanitize_display_string(player.chart['info'].get('title', '___')) if player.chart else '___'
-        artist = sanitize_display_string(player.chart['info'].get('artist', '___')) if player.chart else '___'
-        print(f'Title : {title}')
-        print(f'Artist: {artist}')
+        sanitized_path = sanitize_file_path(args.bmsfile)
+        if not sanitized_path:
+            print(f'Error: Invalid or non-existent BMS file: {args.bmsfile}')
+            sys.exit(1)
 
-        # 音声ロードが完了していない場合は待機
-        if player.audio.is_loading:
-            print('Loading audio...', end='', flush=True)
-            while player.audio.is_loading:
-                time.sleep(0.1)
-                loaded, total = player.audio.loading_progress
-                print(f'\rLoading audio... ({loaded}/{total})    ', end='', flush=True)
-            print('\rAudio ready.                      ')
+        ae = AudioEngine()
+        channel_to_lane = {}
+        player = Player(ae, channel_to_lane)
 
-        init_settings = load_initial_settings(player, args)
-        opts = init_settings['opts']
+        init_opts = load_options(args)
+        print(f'Loading chart: {sanitized_path}')
+        try:
+            player.load_chart(
+                str(sanitized_path),
+                encoding=init_opts.bms_encoding,
+                filter_duplicate_01=init_opts.filter_duplicate_01
+            )
+        except Exception as e:
+            print(f'Error loading chart: {e}')
+            ae.close()
+            sys.exit(1)
 
-        result = prepare_game_start(player, opts, init_settings['channel_to_lane'])
+        # Apply force_mode before load_initial_settings
+        if args.force_mode and player.chart:
+            player.chart['mode'] = args.force_mode
+            player.chart['is_dp'] = (args.force_mode in ('10K', '14K'))
+            print(f'Mode forced to: {args.force_mode}')
 
-        print('Playing... (Press Enter to stop)')
+        print('Loading audio...', end='', flush=True)
+        player.load_audio_async()
 
-        def dummy_on_update(current_time, events, event_index, initial_bpm,
-                            resolution, auto_play):
-            if msvcrt is not None:
-                if msvcrt.kbhit():
-                    ch = msvcrt.getwch()
-                    if ch in ('\r', '\n'):
-                        player.is_playing = False
-            else:
-                if select.select([sys.stdin], [], [], 0)[0]:
-                    sys.stdin.readline()
-                    player.is_playing = False
-
-        player.play(on_update=dummy_on_update, auto_play=True)
-        ae.close()
-        return
-
-    # --- CLI --soundonly パス（従来通り） ---
-    if not args.bmsfile:
-        print('Error: Please specify a BMS file as an argument.')
-        print('Example: python3 cnnm.py path/to/song.bms --soundonly')
-        sys.exit(1)
-
-    sanitized_path = sanitize_file_path(args.bmsfile)
-    if not sanitized_path:
-        print(f'Error: Invalid or non-existent BMS file: {args.bmsfile}')
-        sys.exit(1)
-
-    ae = AudioEngine()
-    channel_to_lane = {}
-    player = Player(ae, channel_to_lane)
-
-    print(f'Loading chart: {sanitized_path}')
-    try:
-        player.load_chart(str(sanitized_path))
-    except Exception as e:
-        print(f'Error loading chart: {e}')
-        ae.close()
-        sys.exit(1)
-
-    # Apply force_mode before load_initial_settings
-    if args.force_mode and player.chart:
-        player.chart['mode'] = args.force_mode
-        player.chart['is_dp'] = (args.force_mode in ('10K', '14K'))
-        print(f'Mode forced to: {args.force_mode}')
-
+    # --- 共通再生フロー ---
     title = sanitize_display_string(player.chart['info'].get('title', '___')) if player.chart else '___'
     artist = sanitize_display_string(player.chart['info'].get('artist', '___')) if player.chart else '___'
     print(f'Title : {title}')
     print(f'Artist: {artist}')
 
-    print('Loading audio...', end='', flush=True)
-    player.load_audio_async()
-    # Wait for audio to finish loading
-    while player.audio.is_loading:
-        time.sleep(0.1)
-        loaded, total = player.audio.loading_progress
-        print(f'\rLoading audio... ({loaded}/{total})    ', end='', flush=True)
-    print('\rAudio ready.                      ')
+    # 音声ロードが完了していない場合は待機
+    if player.audio.is_loading:
+        if preloaded_player is not None:
+            print('Loading audio...', end='', flush=True)
+        while player.audio.is_loading:
+            time.sleep(0.1)
+            loaded, total = player.audio.loading_progress
+            print(f'\rLoading audio... ({loaded}/{total})    ', end='', flush=True)
+        print('\rAudio ready.                      ')
 
     init_settings = load_initial_settings(player, args)
     opts = init_settings['opts']
@@ -159,7 +133,7 @@ def run_soundonly(args, preloaded_player=None, preloaded_ae=None):
                 sys.stdin.readline()
                 player.is_playing = False
 
-    player.play(on_update=dummy_on_update, auto_play=True)
+    player.play(on_update=dummy_on_update, auto_play=True, tail_duration=24.0)
     ae.close()
 
 def main(stdscr, args):
@@ -175,12 +149,17 @@ def main(stdscr, args):
     channel_to_lane = {}
     player = Player(ae, channel_to_lane)  # placeholder, will be set correctly later
 
+    init_opts = load_options(args)
     load_error_msg = None
     if args.bmsfile:
         sanitized_path = sanitize_file_path(args.bmsfile)
         if sanitized_path:
             try:
-                player.load_chart(str(sanitized_path))
+                player.load_chart(
+                    str(sanitized_path),
+                    encoding=init_opts.bms_encoding,
+                    filter_duplicate_01=init_opts.filter_duplicate_01
+                )
                 player.load_audio_async()  # 音声リソースをバックグラウンドでロード開始
             except Exception as e:
                 load_error_msg = f"Error loading chart: {e}"
@@ -196,6 +175,19 @@ def main(stdscr, args):
 
     show_advanced_menu = False
     running = True
+
+    def start_play():
+        """ゲーム開始からプレイ・リザルト表示までを実行する共通ヘルパー"""
+        result = prepare_game_start(player, opts, channel_to_lane)
+        lane_chars = result['lane_chars']
+        KEY_TO_LANE = result['KEY_TO_LANE']
+
+        on_update = make_on_update(stdscr, player, KEY_TO_LANE, opts, lane_chars)
+        stdscr.clear()
+        stdscr.refresh()
+        player.play(on_update=on_update, auto_play=opts.autoplay, tail_duration=12.0)
+        if not opts.autoplay and (player.is_dead or opts.show_result):
+            show_result(stdscr, player, opts.quit_key_code, display_mode=opts.display_mode)
 
     # --nomenu: メニューをスキップして即プレイ
     skip_menu = opts.nomenu or (opts.display_mode == 'soundonly')
@@ -213,19 +205,9 @@ def main(stdscr, args):
             time.sleep(0.1)
 
         # 即プレイ
-        result = prepare_game_start(player, opts, channel_to_lane)
-        channel_to_lane = result['channel_to_lane']
-        lane_chars       = result['lane_chars']
-        KEY_TO_LANE      = result['KEY_TO_LANE']
-
-        on_update = make_on_update(stdscr, player, KEY_TO_LANE, opts, lane_chars)
-        stdscr.clear()
-        stdscr.refresh()
-        player.play(on_update=on_update, auto_play=opts.autoplay)
-        if not opts.autoplay and (player.is_dead or opts.show_result):
-            show_result(stdscr, player, opts.quit_key_code, display_mode=opts.display_mode)
+        start_play()
         ae.close()
-        return player, opts.stdout_result, True, None, None
+        return player, (opts.stdout_result and not opts.autoplay), True, None, None
 
     played = False
     while running:
@@ -321,17 +303,7 @@ def main(stdscr, args):
                     # curses を終了してから soundonly モードで再生する
                     ae.close()
                     return player, opts.stdout_result, False, ae, "RESTART_SOUNDONLY"
-                result = prepare_game_start(player, opts, channel_to_lane)
-                channel_to_lane = result['channel_to_lane']
-                lane_chars = result['lane_chars']
-                KEY_TO_LANE = result['KEY_TO_LANE']
-
-                on_update = make_on_update(stdscr, player, KEY_TO_LANE, opts, lane_chars)
-                stdscr.clear()
-                stdscr.refresh()
-                player.play(on_update=on_update, auto_play=opts.autoplay)
-                if not opts.autoplay and (player.is_dead or opts.show_result):
-                    show_result(stdscr, player, opts.quit_key_code, display_mode=opts.display_mode)
+                start_play()
                 played = True
                 running = False
             elif show_advanced_menu:
@@ -374,9 +346,7 @@ def main(stdscr, args):
 
         time.sleep(0.05) #ここのsleepはメニュー画面での話なのでこれ(20FPS)で十分
     ae.close()
-    return player, opts.stdout_result, played, None, None
-
-from helpers.options import load_options
+    return player, (opts.stdout_result and not opts.autoplay), played, None, None
 
 if __name__ == "__main__":
     args = parse_args()

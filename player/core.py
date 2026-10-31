@@ -2,16 +2,20 @@ import time
 import os
 from parser.bmsparser import BmsParser
 from parser.bmsonparser import BmsonParser
-from helpers.total import estimated_total
 from player.gauge import (
     _hard_gauge_loss,
     _solid_gauge_gain_factor,
     _set_gauge_loss_factor,
     _reset_gauge,
+    get_gauge_increment as _get_gauge_increment,
     set_gauge_increment,
     init_gauge,
     update_gauge,
+    get_auto_scratch_gauge_increment,
 )
+from constants import SCRATCH_CHANNELS
+from player.judgement import get_judgement_windows as _get_judgement_windows
+from player.control import process_control_event
 
 class Player:
     def __init__(self, audio_engine, channel_to_lane):
@@ -82,21 +86,7 @@ class Player:
                     continue
                 self.total_playable_notes += 1
 
-    def apply_measure_change(self, event):
-        """Update current measure length multiplier based on a measure change event.
-        This separates measure-length handling from BPM handling.
-        """
-        self.current_measure_multiplier = event.get('measure_mult', 1.0)
-
-    def apply_bpm_change(self, event):
-        """Update current BPM based on a BPM change event.
-        Centralizes BPM state mutation and updates speed factor for UI scaling.
-        """
-        self.current_bpm = event['bpm']
-        if getattr(self, 'initial_bpm', None):
-            self.speed_factor = self.current_bpm / self.initial_bpm
-
-    def load_chart(self, file_path):
+    def load_chart(self, file_path: str, encoding: str = "cp932", filter_duplicate_01: bool = True):
         ext = os.path.splitext(file_path)[1].lower()
         if ext == '.bmson':
             parser = BmsonParser()
@@ -106,7 +96,10 @@ class Player:
             self.resolution = 1.0 # BMSは拍単位で計算
 
         try:
-            self.chart = parser.parse(file_path)
+            if ext == '.bmson':
+                self.chart = parser.parse(file_path, filter_duplicate_01=filter_duplicate_01)
+            else:
+                self.chart = parser.parse(file_path, encoding=encoding, filter_duplicate_01=filter_duplicate_01)
             if self.chart and 'info' in self.chart:
                 from helpers.sanitizer import sanitize_display_string
                 for key in ('title', 'artist', 'subtitle', 'subartist', 'genre'):
@@ -155,60 +148,16 @@ class Player:
             return 0
         return self.audio.get_audio_time()
 
-    def get_judgement_windows(self):
+    def get_judgement_windows(self) -> tuple[float, float, float, float]:
         """#RANK命令とEASYオプションに基づき、判定窓（秒）を取得する"""
         rank = self.chart['info'].get('rank', 3) if self.chart else 3
-        # デフォルトの判定窓 (BMS #RANK 3 = NORMAL 相当)
-        # RANK: 0: VERY HARD, 1: HARD, 2: NORMAL, 3: EASY, 4: VERY EASY
-        # と言いつつ、歴史的なBMS仕様では RANK 2 が NORMAL, 3 が EASY
-        perf = 0.03
-        great = 0.07
-        good = 0.11
-        bad = 0.15
-
-        if rank == 0:     # VERY HARD
-            perf, great, good, bad = 0.008, 0.024, 0.05, 0.10
-        elif rank == 1:   # HARD
-            perf, great, good, bad = 0.015, 0.045, 0.08, 0.12
-        elif rank == 2:   # NORMAL
-            perf, great, good, bad = 0.03, 0.06, 0.10, 0.15
-        elif rank == 3:   # EASY
-            perf, great, good, bad = 0.05, 0.10, 0.15, 0.20
-        elif rank == 4:   # VERY EASY
-            perf, great, good, bad = 0.10, 0.20, 0.30, 0.40
-
-        # EASYオプションが有効な場合は、さらに判定窓を1.5倍緩くする
-        if self.easy_mode:
-            perf *= 1.5
-            great *= 1.5
-            good *= 1.5
-            bad *= 1.4 # 1.5 #badハマりがゲーム性を損なうのでせめてもの抵抗
-
-        return perf, great, good, bad
+        return _get_judgement_windows(rank, self.easy_mode)
 
     def get_gauge_increment(self):
-        """#TOTAL命令に基づき、ノーツ1つあたりのゲージ増加量を動的計算する
-
-        BMS: #TOTAL は「全ノーツをPERFECTで叩いたときのゲージ増加量合計(%)」の絶対値。
-             increment = total / note_count
-        bmson: total は「デフォルトレートに対する相対乗数」(デフォルト=100)。
-             increment = estimated_total(note_count) * (total / 100) / note_count
-        """
-        total_playable = max(1, self.total_playable_notes)
+        """#TOTAL命令に基づき、ノーツ1つあたりのゲージ増加量を動的計算する"""
         total = self.chart['info'].get('total') if self.chart else None
         is_bmson = self.chart.get('is_bmson', False) if self.chart else False
-
-        if is_bmson:
-            # bmson: total は相対値(デフォルト=100)。標準TOTAL値をestimated_total()で算出する。
-            if total is None or total < 0:
-                total = 100.0  # デフォルト値
-            base = estimated_total(total_playable)
-            # PERFECT/GREAT時の増加量 = デフォルトレート × 相対乗数
-            return base * (float(total) / 100.0) / total_playable
-        else:
-            # BMS: total は絶対値（全PERFECT時のゲージ増加量合計%）
-            # PERFECT/GREAT時の増加量 (総ノーツを全てPERFECT/GREATで叩いたときにTOTAL%増えるようにする)
-            return float(total) / total_playable
+        return _get_gauge_increment(self.total_playable_notes, total, is_bmson)
 
     def _get_polyphony_limit(self, sound_id):
         if not self.chart:
@@ -397,7 +346,7 @@ class Player:
         self.loss_factor = _set_gauge_loss_factor(self.easy_mode, self.solid_gauge)
         init_gauge(self, self.solid_gauge, self.hard_mode)
 
-    def play(self, on_update=None, auto_play=True):
+    def play(self, on_update=None, auto_play=True, tail_duration=12.0):
         if not self.chart:
             return
 
@@ -484,7 +433,6 @@ class Player:
                 # Both control events and audio triggers must wait until their target time is reached
                 if current_time >= target_seconds:
                     # Process control events (BPM or measure changes)
-                    from player.control import process_control_event
                     if process_control_event(self, event, auto_play):
                         event['state'] = 1
                         event_index += 1
@@ -514,7 +462,7 @@ class Player:
                         # Determine if this event is a scratch note
                         channel = event.get('channel')
                         lane_idx = self.channel_to_lane.get(channel)
-                        is_scratch = (channel in ("16", "17", "26", "27", "56", "57", "66", "67", "D6", "D7", "E6", "E7"))
+                        is_scratch = (channel in SCRATCH_CHANNELS)
 
                         if auto_play or (self.auto_scratch and is_scratch):
                             if event.get('sound_id'):
@@ -524,6 +472,8 @@ class Player:
                             # Auto‑play gauge handling – treat every non‑scratch note as a PERFECT hit.
                             # ------------------------------------------------------------------
                             inc = self.perf_gauge_inc
+                            if not auto_play and (self.auto_scratch and is_scratch):
+                                inc = get_auto_scratch_gauge_increment(inc)
                             if self.solid_gauge:
                                 inc *= _solid_gauge_gain_factor(self.gauge)
                             update_gauge(self, min(100.0, self.gauge + inc))
@@ -567,7 +517,7 @@ class Player:
                         # オートスクラッチが有効な場合、スクラッチノーツは見逃しMISS判定から除外する
                         if self.auto_scratch:
                             ch = event.get('channel')
-                            is_scratch = (ch in ("16", "17", "26", "27", "56", "57", "66", "67", "D6", "D7", "E6", "E7"))
+                            is_scratch = (ch in SCRATCH_CHANNELS)
                             if is_scratch:
                                 continue
 
@@ -605,8 +555,8 @@ class Player:
                         event['state'] = 2  # 無害に期限切れにする
 
             # 終了条件：ノーツ完了・最終イベントから2秒経過し、かつ再生中の音がすべて消えた
-            # （万が一音声バッファに微小ノイズ等が残るケースに備え、最終イベント後6秒経過でも安全に終了）
-            if all_processed and (len(self.audio.active_sounds) == 0 or current_time > last_event_time + 6.0):
+            # （万が一音声バッファに微小ノイズ等が残るケースに備え、最終イベント後 tail_duration 秒経過でも安全に終了）
+            if all_processed and (len(self.audio.active_sounds) == 0 or current_time > last_event_time + tail_duration):
                 time.sleep(0.005)
                 self.is_playing = False
                 break

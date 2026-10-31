@@ -3,13 +3,11 @@ import os
 import re
 
 from typing import Any
-from constants import CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT, get_channel_to_lane_map
+from constants import get_channel_to_lane_map, NORMAL_CHANNELS, LN_CHANNELS
 from helpers.total import estimated_total
 from player.mine import is_mine_channel, decode_mine_damage, decode_mine_damage_numeric
 from parser.mode_detector import detect_mode_from_bms
 from parser.util import get_event_priority, filter_duplicate_01_events, build_timeline, calculate_event_times, resolve_ln_partners
-
-from helpers.options import load_options
 
 class BmsParser:
     """Parse BMS files into a structured chart representation.
@@ -274,16 +272,13 @@ class BmsParser:
             return
         raw_data.append((measure_idx, channel, data_str))
 
-    def parse(self, file_path: str, encoding: str = None) -> dict:
+    def parse(self, file_path: str, encoding: str = "cp932", filter_duplicate_01: bool = True) -> dict:
         """Parse a BMS file and return a structured chart dict.
         The method builds header info, wav table, measures multiplier, raw data,
         then computes beat timings and converts them to absolute seconds.
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"BMS file not found: {file_path}")
-
-        if encoding is None:
-            encoding = load_options().bms_encoding
 
         info = {
             'title': '',
@@ -351,16 +346,11 @@ class BmsParser:
             measure_beats[i] = current_beat
             current_beat += 4.0 * measures_multiplier[i]
 
-        ln_channels = {
-            "51", "52", "53", "54", "55", "56", "57", "58", "59",
-            "61", "62", "63", "64", "65", "66", "67", "68", "69"
-        }
-
         # 拍単位での各イベントの beat 値の算出
         events = []
         for measure, channel, data_str in raw_data:
             # If lntype == 2, skip LN channels here to process them separately
-            if info['lntype'] == 2 and channel in ln_channels:
+            if info['lntype'] == 2 and channel in LN_CHANNELS:
                 continue
 
             objects = [data_str[i:i+2] for i in range(0, len(data_str), 2)]
@@ -424,7 +414,7 @@ class BmsParser:
 
         # Process LNTYPE 2 channels separately
         if info['lntype'] == 2:
-            for ch in ln_channels:
+            for ch in LN_CHANNELS:
                 channel_data = [rd for rd in raw_data if rd[1] == ch]
                 if not channel_data:
                     continue
@@ -475,7 +465,7 @@ class BmsParser:
 
         # Mark LNTYPE 1 pairs (handle possible empty cells)
         if info['lntype'] == 1:
-            for ch in ln_channels:
+            for ch in LN_CHANNELS:
                 # extract events for this channel and sort by beat
                 ch_events = [ev for ev in events if ev.get('channel') == ch]
                 ch_events.sort(key=lambda x: x['beat'])
@@ -496,14 +486,10 @@ class BmsParser:
 
         # Mark LNOBJ pairs
         if info['lnobj']:
-            normal_channels = {
-                "11", "12", "13", "14", "15", "16", "17", "18", "19",
-                "21", "22", "23", "24", "25", "26", "27", "28", "29"
-            }
             ch_events_map = {}
             for ev in events:
                 ch = ev.get('channel')
-                if ch in normal_channels:
+                if ch in NORMAL_CHANNELS:
                     ch_events_map.setdefault(ch, []).append(ev)
             for ch, ch_evs in ch_events_map.items():
                 ch_evs.sort(key=lambda x: x['beat'])
@@ -531,7 +517,8 @@ class BmsParser:
         self._add_measure_lines(events, measure_beats)
 
         # 01ch の重複除去
-        events = filter_duplicate_01_events(events)
+        if filter_duplicate_01:
+            events = filter_duplicate_01_events(events)
         # Sort events by beat and priority
         events.sort(key=lambda x: (x['beat'], get_event_priority(x)))
         
@@ -545,19 +532,15 @@ class BmsParser:
         if not isinstance(info.get('total'), (int, float)) or info['total'] <= 0:
             # プレイ可能なノーツのみをカウント（チャンネル03/08/09や01のBGMを除いた、11〜29などのレーンチャンネル）
             # LNの終端はカウントしないようにする
-            playable_channels = {
-                "11", "12", "13", "14", "15", "16", "17", "18", "19",
-                "21", "22", "23", "24", "25", "26", "27", "28", "29"
-            }
             note_count = 0
             for ev in events:
                 ch = ev.get('channel')
-                if ch in playable_channels:
+                if ch in NORMAL_CHANNELS:
                     # If LNOBJ, the end note has ln_state == 'end', so do not count it
                     if ev.get('ln_state') == 'end':
                         continue
                     note_count += 1
-                elif ch in ln_channels and ev.get('ln_state') == 'start':
+                elif ch in LN_CHANNELS and ev.get('ln_state') == 'start':
                     note_count += 1
             info['total'] = estimated_total(note_count)
 

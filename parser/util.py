@@ -1,17 +1,6 @@
 from typing import Any
-
-#TODO: lazy import or delete it from bms[on]parser
+from constants import PLAYABLE_CHANNELS
 from parser.timing import BpmTimeline, stop_seconds
-
-
-def _playable_channels() -> set[str]:
-    """Return the set of channel identifiers that are considered playable for 01ch duplicate removal."""
-    return {
-        "11", "12", "13", "14", "15", "16", "17", "18", "19",
-        "21", "22", "23", "24", "25", "26", "27", "28", "29",
-        "51", "52", "53", "54", "55", "56", "57", "58", "59",
-        "61", "62", "63", "64", "65", "66", "67", "68", "69"
-    }
 
 
 def get_event_priority(ev: dict[str, Any]) -> float:
@@ -49,12 +38,11 @@ def filter_duplicate_01_events(events: list[dict[str, Any]]) -> list[dict[str, A
         all subsequent 01 events with that beat/sound_id are removed.
       * Among 01 events themselves, later duplicates of the same beat/sound_id are removed.
     """
-    playable_ch = _playable_channels()
     # Build a set of (beat, sound_id) pairs that already exist on playable channels
     existing_keys: set[tuple] = {
         (ev["beat"], ev.get("sound_id"))
         for ev in events
-        if ev.get("channel") in playable_ch and ev.get("sound_id") is not None
+        if ev.get("channel") in PLAYABLE_CHANNELS and ev.get("sound_id") is not None
     }
 
     seen_01: set[tuple] = set()
@@ -70,12 +58,6 @@ def filter_duplicate_01_events(events: list[dict[str, Any]]) -> list[dict[str, A
         filtered.append(ev)
 
     return filtered
-
-
-#def sort_events(events: list[dict[str, Any]]) -> None:
-#    """Sort events by beat and priority."""
-#    events.sort(key=lambda x: (x["beat"], get_event_priority(x)))
-
 
 def calculate_event_times(events: list[dict[str, Any]], initial_bpm: float) -> None:
     """

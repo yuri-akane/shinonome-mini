@@ -12,13 +12,7 @@ class MwRenderer(BaseRenderer):
     """
 
     def __init__(self, mode: str, judgement_y_config: int = 12, lane_x: int = 8, start_y: int = 3):
-        self.mode = mode.upper()
-        self.is_dp = (self.mode in ('10K', '14K'))
-        self.lane_x = lane_x
-        self.start_y = start_y
-        self.judgement_y = judgement_y_config
-
-        self.lane_count, self.half = lane_info(self.mode)
+        super().__init__(mode, judgement_y_config, lane_x, start_y)
         self.last_judge_x = self.lane_x
         self.frozen_active_pane: str | None = None  # 'upper' or 'lower'。None=通常モード
         self.frozen_judge_x: int = self.lane_x      # ギミック突入時の judge_x を凍結
@@ -39,7 +33,8 @@ class MwRenderer(BaseRenderer):
                      events: list, event_index: int, player, lane_chars, opts, max_y: int, max_x: int,
                      key_names: list = None, use_fixed_judge: bool = False,
                      flipbook_partner_pane: bool = False, partner_offset_beats: float = 0.0,
-                     visual_beat_offset: float = 0.0, is_reverse_bpm: bool = False):
+                     visual_beat_offset: float = 0.0, is_reverse_bpm: bool = False,
+                     rendered_events: set = None):
 
         end_beat = start_beat + beats_per_window
         dp_offset = 1 if (self.is_dp and self.half > 0) else 0
@@ -122,16 +117,16 @@ class MwRenderer(BaseRenderer):
                         m_x = judge_x + int(round((ev_beat - current_beat) * beat_width))
                 else:
                     disp_m_beat = ev_beat - visual_beat_offset
-                    if disp_m_beat < start_beat:
+                    # 左端セル (m_x == lane_x) に丸め込まれる直前の微小オフセットまで受け入れる
+                    if disp_m_beat < start_beat - (0.5 / beat_width):
                         continue
                     if disp_m_beat >= end_beat + 1.0:
                         break
-                    if start_beat <= disp_m_beat < end_beat:
-                        m_x = calc_x_from_disp_beat(disp_m_beat)
-                    else:
+                    raw_m_x = calc_x_from_disp_beat(disp_m_beat)
+                    # 右端枠外 (raw_m_x >= lane_x + track_width) は右端に押し込まず次ペインに任せる
+                    if not (self.lane_x <= raw_m_x < self.lane_x + track_width):
                         continue
-
-                m_x = max(self.lane_x, min(m_x, self.lane_x + track_width - 1))
+                    m_x = raw_m_x
 
                 if self.lane_x <= m_x < self.lane_x + track_width:
                     for idx in range(self.lane_count):
@@ -140,72 +135,7 @@ class MwRenderer(BaseRenderer):
                         if row_y < bottom_y and row_y < max_y - 1:
                             self.safe_addstr(stdscr, row_y, m_x, "|", curses.A_DIM)
 
-        # Draw Notes in active window
-        for i in range(event_index, len(events)):
-            event = events[i]
-            channel = event.get('channel')
-            if not channel or channel == 'measure_line':
-                continue
-
-            if not self.is_note_visible(event, current_time):
-                continue
-
-            lane_idx = self.get_lane_index(channel, player)
-            if lane_idx is None or lane_idx >= self.lane_count:
-                continue
-
-            ev_beat = event.get('beat', 0.0)
-            if use_fixed_judge:
-                if ev_beat < current_beat - beats_per_window:
-                    continue
-                if ev_beat > current_beat + beats_per_window * 2:
-                    break
-                if flipbook_partner_pane:
-                    note_x = self.lane_x + int(round((ev_beat - current_beat - partner_offset_beats) * beat_width))
-                else:
-                    note_x = judge_x + int(round((ev_beat - current_beat) * beat_width))
-            else:
-                disp_ev_beat = ev_beat - visual_beat_offset
-                if disp_ev_beat < start_beat:
-                    continue
-                if disp_ev_beat >= end_beat + 1.0:
-                    break
-                if start_beat <= disp_ev_beat < end_beat:
-                    note_x = calc_x_from_disp_beat(disp_ev_beat)
-                else:
-                    continue
-
-            note_x = max(self.lane_x, min(note_x, self.lane_x + track_width - 1))
-
-            if not (self.lane_x <= note_x < self.lane_x + track_width):
-                continue
-
-            # MW: 判定ラインを通過した位置のノートは非表示（アクティブペインのみ）
-            # 正BPM時: 左から右へ進むため note_x < judge_x が通過済み
-            # 負BPM時: 右から左へ進むため note_x > judge_x が通過済み
-            # （切り替わり時は判定ラインが通り過ぎるまでは切り替わり前のノーツが表示され、
-            #   通り過ぎると通過済みとなって非表示または切り替わり後のノーツが表示される）
-            if is_active:
-                if is_reverse_bpm and note_x > judge_x:
-                    continue
-                elif not is_reverse_bpm and note_x < judge_x:
-                    continue
-
-            offset = 1 if (self.is_dp and self.half > 0 and lane_idx >= self.half) else 0
-            row_y = start_y + 1 + lane_idx + offset
-
-            if row_y < bottom_y and row_y < max_y - 1:
-                if event.get('is_mine'):
-                    n_str = "!"
-                    n_attr = curses.A_REVERSE
-                else:
-                    ch = lane_chars.get(lane_idx, "*") if isinstance(lane_chars, dict) else lane_chars[lane_idx]
-                    n_str = ch[0] if isinstance(ch, str) and len(ch) > 0 else "*"
-                    n_attr = curses.A_BOLD if (is_active or use_fixed_judge) else curses.A_NORMAL
-
-                self.safe_addstr(stdscr, row_y, note_x, n_str, n_attr)
-
-        # Draw Long Notes (LN Bodies & Heads)
+        # Draw Long Notes (LN Bodies & Heads) — Foreground layer 1
         for i in range(event_index, len(events)):
             event = events[i]
             if event.get('ln_state') != 'end':
@@ -281,8 +211,11 @@ class MwRenderer(BaseRenderer):
             # LNヘッド：ギミック時はBeat範囲条件をX座標範囲で代替
             disp_s = s_beat if use_fixed_judge else (s_beat - visual_beat_offset)
             disp_e = e_beat if use_fixed_judge else (e_beat - visual_beat_offset)
+            head_ev_id = id(start_ev)
+            already_drawn_head = (rendered_events is not None and head_ev_id in rendered_events)
             show_head = (
-                (use_fixed_judge or (start_beat <= disp_s < end_beat))
+                not already_drawn_head
+                and (use_fixed_judge or (start_beat - (0.5 / beat_width) <= disp_s < end_beat - (0.5 / beat_width)))
                 and not start_ev.get('manual_hit')
                 and (current_time < start_ev.get('time', 0.0))
             )
@@ -292,13 +225,97 @@ class MwRenderer(BaseRenderer):
                     passed = (x_start_ln > judge_x) if is_reverse_bpm else (x_start_ln < judge_x)
                     if not (is_active and passed):
                         self.safe_addstr(stdscr, row_y, x_start_ln, head_char, curses.A_BOLD if (is_active or use_fixed_judge) else curses.A_NORMAL)
+                        if rendered_events is not None:
+                            rendered_events.add(head_ev_id)
 
-            show_tail = use_fixed_judge or (start_beat <= disp_e < end_beat)
+            tail_ev_id = id(event)
+            already_drawn_tail = (rendered_events is not None and tail_ev_id in rendered_events)
+            show_tail = (
+                not already_drawn_tail
+                and (use_fixed_judge or (start_beat - (0.5 / beat_width) <= disp_e < end_beat - (0.5 / beat_width)))
+            )
             if show_tail:
                 if self.lane_x <= x_end_ln < self.lane_x + track_width:
                     show_end = opts.show_ln_end_head if opts else False
                     end_char = head_char if show_end else "|"
                     self.safe_addstr(stdscr, row_y, x_end_ln, end_char, curses.A_BOLD if (is_active or use_fixed_judge) else curses.A_NORMAL)
+                    if rendered_events is not None:
+                        rendered_events.add(tail_ev_id)
+
+        # Draw Notes in active window — Foreground layer 2
+        for i in range(event_index, len(events)):
+            event = events[i]
+            channel = event.get('channel')
+            if not channel or channel == 'measure_line':
+                continue
+
+            # Skip LN end events in note loop (handled by LN loop above)
+            if event.get('ln_state') == 'end':
+                continue
+
+            if not self.is_note_visible(event, current_time):
+                continue
+
+            ev_id = id(event)
+            if rendered_events is not None and ev_id in rendered_events:
+                continue
+
+            lane_idx = self.get_lane_index(channel, player)
+            if lane_idx is None or lane_idx >= self.lane_count:
+                continue
+
+            ev_beat = event.get('beat', 0.0)
+            if use_fixed_judge:
+                if ev_beat < current_beat - beats_per_window:
+                    continue
+                if ev_beat > current_beat + beats_per_window * 2:
+                    break
+                if flipbook_partner_pane:
+                    note_x = self.lane_x + int(round((ev_beat - current_beat - partner_offset_beats) * beat_width))
+                else:
+                    note_x = judge_x + int(round((ev_beat - current_beat) * beat_width))
+                note_x = max(self.lane_x, min(note_x, self.lane_x + track_width - 1))
+                if not (self.lane_x <= note_x < self.lane_x + track_width):
+                    continue
+            else:
+                disp_ev_beat = ev_beat - visual_beat_offset
+                # 左端セル (note_x == lane_x) に四捨五入される直前の微小オフセットまで受け入れる
+                # これにより、小節境界直前のノーツが次ペインの左端で確実に拾われる
+                if disp_ev_beat < start_beat - (0.5 / beat_width):
+                    continue
+                if disp_ev_beat >= end_beat + 1.0:
+                    break
+                raw_x = calc_x_from_disp_beat(disp_ev_beat)
+                # 右端枠外 (raw_x >= lane_x + track_width) のノーツは右端に押し込まずスキップ（次ペインの左端に委ねる）
+                # 左端枠外 (raw_x < lane_x) のノーツも前ペインの領域外なのでスキップ
+                if not (self.lane_x <= raw_x < self.lane_x + track_width):
+                    continue
+                note_x = raw_x
+
+            # MW: 判定ラインを通過した位置のノートは非表示（アクティブペインのみ）
+            # 正BPM時: 左から右へ進むため note_x < judge_x が通過済み
+            # 負BPM時: 右から左へ進むため note_x > judge_x が通過済み
+            if is_active:
+                if is_reverse_bpm and note_x > judge_x:
+                    continue
+                elif not is_reverse_bpm and note_x < judge_x:
+                    continue
+
+            offset = 1 if (self.is_dp and self.half > 0 and lane_idx >= self.half) else 0
+            row_y = start_y + 1 + lane_idx + offset
+
+            if row_y < bottom_y and row_y < max_y - 1:
+                if event.get('is_mine'):
+                    n_str = "!"
+                    n_attr = curses.A_REVERSE
+                else:
+                    ch = lane_chars.get(lane_idx, "*") if isinstance(lane_chars, dict) else lane_chars[lane_idx]
+                    n_str = ch[0] if isinstance(ch, str) and len(ch) > 0 else "*"
+                    n_attr = curses.A_BOLD if (is_active or use_fixed_judge) else curses.A_NORMAL
+
+                self.safe_addstr(stdscr, row_y, note_x, n_str, n_attr)
+                if rendered_events is not None:
+                    rendered_events.add(ev_id)
 
         # Draw Scanning Judgement Line (Playhead) - ONLY on Active Pane
         if is_active:
@@ -324,15 +341,12 @@ class MwRenderer(BaseRenderer):
         self.safe_addstr(stdscr, 2, 2, f"BPM: {current_bpm:.1f} | Time: {draw_time:.2f}s | HS: {opts.hispeed:.1f}")
 
         # Gauge & Score Header
-        gauge_attr = curses.A_BOLD
-        if player.hard_mode and player.gauge <= 30.0:
-            gauge_attr |= curses.A_BLINK
-        elif player.gauge >= 80.0:
-            gauge_attr |= curses.A_STANDOUT
-        self.safe_addstr(stdscr, 2, 45, f"GAUGE: {player.gauge:5.1f}%", gauge_attr)
+        gauge_label, gauge_attr = self.get_gauge_display_info(player, opts)
+        gauge_str = f"{gauge_label}: {player.gauge:5.1f}%"
+        self.safe_addstr(stdscr, 2, 45, gauge_str, gauge_attr)
 
         max_score = player.total_playable_notes * 2
-        self.safe_addstr(stdscr, 2, 62, f"EX: {player.ex_score:4d}/{max_score:4d} | COMBO: {player.combo:4d}")
+        self.safe_addstr(stdscr, 2, 45 + len(gauge_str) + 2, f"EX: {player.ex_score:4d}/{max_score:4d} | COMBO: {player.combo:4d}")
 
         # Calculate beat progression & measure windows for 2-pane alternating sweep
         beats_per_window = 4.0 / max(0.01, opts.hispeed)
@@ -435,6 +449,7 @@ class MwRenderer(BaseRenderer):
             pass_beat = display_beat
 
         draw_start_idx = self.get_draw_start_index(events, draw_time, lookback_sec=10.0)
+        rendered_events = None if use_fixed_judge else set()
 
         # Render Upper Pane
         upper_start_y = 3
@@ -447,7 +462,8 @@ class MwRenderer(BaseRenderer):
                           flipbook_partner_pane=upper_flipbook_partner,
                           partner_offset_beats=beats_per_window,
                           visual_beat_offset=self.visual_beat_offset,
-                          is_reverse_bpm=(current_bpm < 0))
+                          is_reverse_bpm=(current_bpm < 0),
+                          rendered_events=rendered_events)
 
         # Render Lower Pane
         lower_start_y = upper_start_y + 2 + self.lane_count + dp_extra
@@ -462,7 +478,8 @@ class MwRenderer(BaseRenderer):
                           flipbook_partner_pane=lower_flipbook_partner,
                           partner_offset_beats=beats_per_window,
                           visual_beat_offset=self.visual_beat_offset,
-                          is_reverse_bpm=(current_bpm < 0))
+                          is_reverse_bpm=(current_bpm < 0),
+                          rendered_events=rendered_events)
 
         # Footer Stats & Judgement Display
         footer_y = lower_start_y + 2 + self.lane_count + dp_extra

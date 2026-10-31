@@ -209,14 +209,15 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 減少量は、HARDと併用した場合にはそのまま、それ以外のモードでは通常の1/3（poor:-2%、EASYはさらに半分）です。
 
 ## 設定 (`settings.toml`)
-- **scratch.side** – `"left"` or `"right"`
-- **keys** – 各レーンとスクラッチに好みのキーを割り当てます（デフォルトは `z s x d …` ）
+- scratch.side - `"left"` or `"right"`
+- keys - 各レーンとスクラッチに好みのキーを割り当てます（デフォルトは `z s x d …` ）
 - Hispeed 変更ボタンのデフォルト動作を `keyup`/`keydown` に変更しました。設定でカスタマイズ可能です。
-- **play_options** – オートプレイ、ミラー、ランダム、イージー、ハードなどの切り替えを行います。
-- **judgement** – 判定ラインの位置やタイミングオフセットを調整します。
+- play_options - オートプレイ、ミラー、ランダム、イージー、ハードなどの切り替えを行います。
+- judgement - 判定ラインの位置やタイミングオフセットを調整します。
 - 音がブツブツ切れるときは、audioセクションでサンプリングレートを下げ、モノラルに設定してください。
    - numpyがインストールされているかもチェックしてください。
 - デフォルトの文字コードにはshift-jis(cp932), euc-kr(cp949), utf-8を設定できます。
+- filter_duplicate_01 - 01ch (BGM) の重複除去の有効/無効 (true/false) を切り替えます。一部のBMSで音が重複・破綻する場合や、逆に本来鳴るべきBGMが消えてしまう場合に設定を変更してください。
 
 ## ライセンス
 - GPLv3
@@ -229,7 +230,7 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 画像・動画表示
 - hidden/sudden, S-RAN/H-RAN/R-RAN, FLIP(DP), etc
 - スコア記録・保存・送信、ファイル出力
-- IR等オンライン接続
+- IR等オンライン接続、差分等自動ダウンロード
 - ZZ（即死）地雷、不可視ノーツ、FREEZONE
 - 特殊なノーツの落ち方（加速、減速、逆流、ゆらゆら、など）
    - マイナスBPMと負のSCROLL（逆流）はある程度は動作確認しています。
@@ -256,12 +257,13 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 空打ちPOOR（とりあえずありません）
 - フォルダ分け、ランダム選択、course play、段位
 
-## todoあとで確認
+## 継続確認
 - wav,bmp等がサブフォルダにわかれているbmsの動作確認
 - bmsonのときbpm確認（1ずれない？）
    - 特に1分以上の1本wav等で少し音ズレしてます。bmsなら切り捨てますが、bmsonは仕様上音切りをプレイヤー側に任せうるので要調整…
    - 若干改善しましたが要確認(@ver1.79)
 - bmsonのとき実質無音ノーツになってる？（音切りされていないbmsonの仕様）
+- MixWaver Modeでのpane端のノーツの挙動
 - do more tests, do more bms.
 
 ## changelog
@@ -301,3 +303,6 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.81f debug MixWaver Mode (pane端のノーツが表示されないことがあった）
 - 1.82 マイナスBPM, --hispeed cmdline option
 - 1.83 tips追加
+- 1.84 細かい仕様変更（オートスクラッチの回復量を1/2に、曲終了時のフェードアウト改善、AUTOでstdout_statsしないように）
+- 1.85 01ch(BGM)の重複時の動作をユーザが設定(settings.toml)できるように、debug MixWaver Mode (pane端のノーツが今度は重複表示されることがあった、LN終点でノーツが重複する可能性があった）、その他リファクタリング
+

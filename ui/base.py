@@ -23,6 +23,14 @@ def lane_info(mode: str) -> tuple[int, int]:
 class BaseRenderer:
     """Base class for UI Renderers."""
 
+    def __init__(self, mode: str, judgement_y_config: int, lane_x: int, start_y: int):
+        self.mode = mode.upper()
+        self.is_dp = (self.mode in ('10K', '14K'))
+        self.lane_x = lane_x
+        self.start_y = start_y
+        self.judgement_y = judgement_y_config
+        self.lane_count, self.half = lane_info(self.mode)
+
     def lane_info(self, mode: str = None) -> tuple[int, int]:
         """レーン数と半分位置を返す。"""
         m = mode if mode is not None else getattr(self, 'mode', '7K')
@@ -99,6 +107,26 @@ class BaseRenderer:
         # Standard notes: visible until passed judgment line plus flash duration
         target_time = event.get('time', 0.0)
         return (draw_time - target_time) < 0.08
+
+    def get_gauge_display_info(self, player, opts) -> tuple[str, int]:
+        """ゲージの表示ラベル名とcurses属性 (blink/standout) を返す。"""
+        gauge_attr = curses.A_BOLD
+        if player.hard_mode:
+            gauge_label = "HARD SOLID" if getattr(opts, 'solid', False) else "HARD GAUGE"
+            if player.gauge <= 30.0:
+                gauge_attr |= curses.A_BLINK
+            elif player.gauge >= 80.0:
+                gauge_attr |= curses.A_STANDOUT
+        elif getattr(player, 'easy_mode', False):
+            gauge_label = "EASY SOLID" if getattr(opts, 'solid', False) else "EASY GAUGE"
+            if player.gauge >= 80.0:
+                gauge_attr |= curses.A_STANDOUT
+        else:
+            gauge_label = "SOLID GAUGE" if getattr(opts, 'solid', False) else "GAUGE"
+            if player.gauge >= 80.0:
+                gauge_attr |= curses.A_STANDOUT
+
+        return gauge_label, gauge_attr
 
     def calculate_scale_and_state(self, player, draw_time, initial_bpm, opts, base_speed=22.0):
         """Calculate scale, player_height, and current_bpm from timeline or fallback using draw_time."""

@@ -3,12 +3,10 @@ import os
 import re
 
 from typing import Any, Optional
-from constants import CHANNEL_TO_LANE_LEFT, CHANNEL_TO_LANE_RIGHT, get_channel_to_lane_map
+from constants import get_channel_to_lane_map
 from player.mine import is_mine_channel, decode_mine_damage, decode_mine_damage_numeric
 from parser.mode_detector import detect_mode_from_bmson
 from parser.util import get_event_priority, filter_duplicate_01_events, build_timeline, calculate_event_times, resolve_ln_partners
-
-from helpers.options import load_options
 
 class BmsonParser:
     def __init__(self):
@@ -46,7 +44,7 @@ class BmsonParser:
                     "measure_idx": idx,
                 })
 
-    def parse(self, file_path: str) -> dict:
+    def parse(self, file_path: str, filter_duplicate_01: bool = True) -> dict:
         """bmsonファイルをパースして内部形式に変換する"""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"bmson file not found: {file_path}")
@@ -278,7 +276,8 @@ class BmsonParser:
         self._add_measure_lines(events, max_beat, data.get('lines'), resolution)
 
         # 01ch の重複除去
-        events = filter_duplicate_01_events(events)
+        if filter_duplicate_01:
+            events = filter_duplicate_01_events(events)
         # Sort events by beat and priority
         events.sort(key=lambda x: (x['beat'], get_event_priority(x)))
 

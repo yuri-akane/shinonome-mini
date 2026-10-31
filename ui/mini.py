@@ -5,13 +5,8 @@ class MiniRenderer(BaseRenderer):
     """Mini (standard UI) Renderer."""
 
     def __init__(self, mode: str, judgement_y_config: int, lane_x: int = 4, start_y: int = 4):
-        self.mode = mode.upper()
-        self.is_dp = (self.mode in ('10K', '14K'))
-        self.lane_x = lane_x
-        self.start_y = start_y
-        self.judgement_y = judgement_y_config
+        super().__init__(mode, judgement_y_config, lane_x, start_y)
 
-        self.lane_count, self.half = lane_info(self.mode)
         if self.half > 0:
             self.LANE_UNIT = "|" + "    |" * self.half + " " + "|" + "    |" * self.half
             self.JUDGE_UNIT = "+" + "----+" * self.half + " " + "+" + "----+" * self.half
@@ -79,25 +74,8 @@ class MiniRenderer(BaseRenderer):
             bar_list.append("=" if i < filled_segments else "-")
         bar_list.insert(16, "|")
         gauge_bar = "".join(bar_list)
-        gauge_attr = curses.A_BOLD
-        if player.hard_mode:
-            gauge_mode_label = "HARD "
-            gauge_mode_label2 = "SOLID" if opts.solid else "GAUGE"
-            if player.gauge <= 30.0:
-                gauge_attr |= curses.A_BLINK
-            elif player.gauge >= 80.0:
-                gauge_attr |= curses.A_STANDOUT
-        elif getattr(player, 'easy_mode', False):
-            gauge_mode_label = "EASY "
-            gauge_mode_label2 = "SOLID" if opts.solid else "GAUGE"
-            if player.gauge >= 80.0:
-                gauge_attr |= curses.A_STANDOUT
-        else:
-            gauge_mode_label = ""
-            gauge_mode_label2 = "SOLID GAUGE" if opts.solid else "GAUGE"
-            if player.gauge >= 80.0:
-                gauge_attr |= curses.A_STANDOUT
-        self.safe_addstr(stdscr, self.stats_y, self.stat_x, f"{gauge_mode_label}{gauge_mode_label2}: [{gauge_bar}] {player.gauge:5.1f}%", gauge_attr)
+        gauge_label, gauge_attr = self.get_gauge_display_info(player, opts)
+        self.safe_addstr(stdscr, self.stats_y, self.stat_x, f"{gauge_label}: [{gauge_bar}] {player.gauge:5.1f}%", gauge_attr)
 
         max_score = player.total_playable_notes * 2
         self.safe_addstr(stdscr, self.stats_y + 2, self.stat_x, f"EX SCORE: {player.ex_score:5d} / {max_score:5d}")

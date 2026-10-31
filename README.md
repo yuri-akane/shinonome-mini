@@ -207,14 +207,15 @@ normal gauge.
 - Decrease Rate: Same as HARD gauge when combined; otherwise, 1/3 of normal gauge(poor:-2%, and less(half) with EASY).
 
 ## Configuration (`settings.toml`)
-- **scratch.side** – `"left"` or `"right"`
-- **keys** – map each lane and scratches to your preferred keys (default: `z s x d …`).
+- scratch.side - `"left"` or `"right"`
+- keys - map each lane and scratches to your preferred keys (default: `z s x d …`).
 - Hispeed change button default actions have been switched to `keyup`/`keydown` for better responsiveness, and can be customized via the `settings.toml`.
-- **play_options** – toggle auto‑play, mirror, random, easy mode, etc.
-- **judgement** – customize judgement line position and timing offset
+- play_options - toggle auto‑play, mirror, random, easy mode, etc.
+- judgement - customize judgement line position and timing offset
 - If audio crackles or stutters, try a lower sample rate and nchannels = 1 (monaural) in the `audio` section.
    - also, check numpy installed.
 - Default encodings can be set to shift-jis(cp932), euc-kr(cp949), utf-8
+- filter_duplicate_01 - enable/disable duplicate removal on 01ch(BGM) (true/false). Change this if BGM sounds overlap/corrupted or conversely disappear on certain BMS charts.
 
 ## License
 - GPLv3
@@ -227,7 +228,7 @@ normal gauge.
 - movie or image (BMP, BGA)
 - hidden/sudden, S-RAN/H-RAN/R-RAN, FLIP(DP), etc
 - score/file output
-- IR or network connection
+- IR or network connection, downloader
 - ZZ mine, invisible notes, FREEZONE
 - specialized way of notes flow (acceleration, decceleration, reverse, unstable speed, etc)
    - minus BPM and minus SCROLL may be done, but not be fully tested
@@ -259,6 +260,7 @@ normal gauge.
    - espacially, wav/mp3 over 1min (bmson)
    - Verify as imporoved at ver1.79
 - Check that bmson charts do not produce silent notes. (about bmson that doesnot cut WAVs.)
+- Check MixWaver Mode, notes at the edge of pane
 - do more tests, do more bms.
 
 ## changelog
@@ -298,3 +300,5 @@ normal gauge.
 - 1.81f debug MixWaver Mode (notes were not visible at the edge of pane）
 - 1.82 minus BPM, --hispeed cmdline option
 - 1.83 add tips
+- 1.84 misc（gauge inc to be 1/2 at autoscratch, improve fadeout, do not stdout_stats() at auto option.）
+- 1.85 duplicate removal on 01ch(BGM) setting, debug MixWaver Mode (also removal duplicated notes at the edge of pane and possible duplicated notes at LN-end-head）and some refactoring

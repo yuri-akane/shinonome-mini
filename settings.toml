@@ -1,4 +1,4 @@
-# settings.toml – configuration for Shinonome Mini ver1.81+
+# settings.toml – configuration for Shinonome Mini ver1.85+
 
 #roots for bmsfd.py
 #ここをお持ちのbmsのpathに書き換えてください。
@@ -166,6 +166,7 @@ nchannels = 2         # チャンネル数: 1=モノラル, 2=ステレオ
 # BMSファイルテキスト読み込み設定
 [bms]
 encoding = "cp932"    # bmsテキストのエンコーディング ("cp932" / "cp949" / "utf-8")
+filter_duplicate_01 = false  # 01ch(BGM)の重複除去(true: 有効 / false: 無効)
 
 
 # 外部BMSプレイヤー・ビューアー起動設定
