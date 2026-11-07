@@ -30,6 +30,7 @@ class Player:
         self.easy_mode = False
         self.hard_mode = False
         self.solid_gauge = False
+        self.empty_poor = False
         self.current_scroll = 1.0
         self.active_key_lanes = None
         
@@ -256,6 +257,26 @@ class Player:
                         self.is_dead = True
                         self.is_playing = False
                     return
+
+            # 地雷も踏んでいない場合、空打ちPOOR判定（ノーツの手前 bad_w < diff <= bad_w + 0.05）
+            if getattr(self, 'empty_poor', False) and best_event:
+                if not (self.auto_scratch and is_scratch):
+                    target_time = best_event['time'] + offset_seconds
+                    poor_w = bad_w + 0.05
+                    if target_time > current_time and bad_w < adjusted_diff <= poor_w:
+                        self.miss_count += 1
+                        self.combo = 0
+                        if self.hard_mode:
+                            loss = _hard_gauge_loss(self.gauge, is_miss=False)
+                            update_gauge(self, max(0.0, self.gauge + loss))
+                            if self.gauge <= 0.0:
+                                self.is_dead = True
+                                self.is_playing = False
+                        else:
+                            update_gauge(self, max(0.0, self.gauge - (4.0 * self.loss_factor)))
+                        self.last_judgement = "MISS"
+                        self.judgement_time = current_time
+            return
 
         # 判定窓（BAD以内）ならHIT (通常ノーツ)
         if best_event and adjusted_diff <= bad_w:

@@ -8,6 +8,9 @@ from player.mine import is_mine_channel, decode_mine_damage, decode_mine_damage_
 from parser.mode_detector import detect_mode_from_bmson
 from parser.util import get_event_priority, filter_duplicate_01_events, build_timeline, calculate_event_times, resolve_ln_partners
 
+# 小節数の上限（メモリ枯渇 DoS 対策）
+_MAX_MEASURES = 1_000_000
+
 class BmsonParser:
     def __init__(self):
         pass
@@ -32,7 +35,7 @@ class BmsonParser:
                     })
         else:
             # lines が省略されている場合は 4拍間隔で max_beat まで自動生成
-            num_measures = int(max_beat / 4.0) + 2
+            num_measures = min(int(max_beat / 4.0) + 2, _MAX_MEASURES)
             for idx in range(num_measures):
                 m_start_beat = idx * 4.0
                 if m_start_beat > max_beat:
@@ -296,7 +299,7 @@ class BmsonParser:
         elif song_info['total'] < 0:
             song_info['total'] = abs(song_info['total'])
 
-        measures_multiplier = [1.0] * (int(max_beat / 4.0) + 100)
+        measures_multiplier = [1.0] * min(int(max_beat / 4.0) + 100, _MAX_MEASURES)
         timeline = build_timeline(song_info, events, measures_multiplier)
 
         # Channel to lane mapping

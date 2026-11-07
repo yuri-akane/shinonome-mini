@@ -13,6 +13,8 @@ or a virtual root that lists all allowed roots if none are specified.
 import curses
 from pathlib import Path
 import re
+import shlex
+import shutil
 import sys
 import subprocess
 import unicodedata
@@ -140,10 +142,11 @@ def load_settings() -> dict:
         import tomli as tomllib
 
     repo_root = Path(__file__).resolve().parent
+    cnnm_path = str(repo_root / "cnnm.py")
     settings_file = repo_root / "settings.toml"
     default_launchers = {
         "default": "cnnm",
-        "cnnm": {"name": "Shinonome Mini (cnnm.py)", "command": ["python3", "cnnm.py", "{file}"]}
+        "cnnm": {"name": "Shinonome Mini (cnnm.py)", "command": [sys.executable, cnnm_path, "{file}"]}
     }
     if not settings_file.exists():
         return {"roots": set(), "encoding": "cp932", "launchers": default_launchers}
@@ -206,30 +209,48 @@ def launch_external_app(stdscr, cmd_template: list[str] | str, path: Path) -> tu
 
     # Format the command arguments
     if isinstance(cmd_template, str):
-        cmd = [cmd_template.format(file=str(path))]
+        cmd_args = shlex.split(cmd_template)
     elif isinstance(cmd_template, list):
-        cmd = [arg.format(file=str(path)) for arg in cmd_template]
+        cmd_args = list(cmd_template)
     else:
         return stdscr, "Error: Invalid launcher command configuration."
+
+    repo_root = Path(__file__).resolve().parent
+    cnnm_path = str(repo_root / "cnnm.py")
+
+    cmd = []
+    for arg in cmd_args:
+        formatted_arg = arg.format(file=str(path))
+        if formatted_arg in ("cnnm.py", "./cnnm.py"):
+            formatted_arg = cnnm_path
+        cmd.append(formatted_arg)
+
+    if not cmd:
+        return stdscr, "Error: Launcher command is empty."
+
+    if len(cmd) >= 2 and cmd[0] in ("python", "python3") and cmd[1] == cnnm_path:
+        cmd[0] = sys.executable
+    else:
+        resolved_cmd = shutil.which(cmd[0])
+        if resolved_cmd:
+            cmd[0] = resolved_cmd
 
     curses.endwin()
     err_msg = None
     try:
-        subprocess.run(cmd)
+        subprocess.run(cmd, cwd=repo_root)
     except FileNotFoundError:
         err_msg = f"Error: Command not found ({cmd[0]})"
     except Exception as e:
         err_msg = f"Error launching app: {e}"
     finally:
         new_stdscr = curses.initscr()
-        curses.curs_set(0)
+        try:
+            curses.curs_set(0)
+        except Exception:
+            pass
     return new_stdscr, err_msg
 
-
-def open_file_with_cnnm(stdscr, path: Path) -> curses.window:
-    """Compatibility wrapper that launches cnnm on the given file."""
-    new_stdscr, _ = launch_external_app(stdscr, ["python3", "cnnm.py", "{file}"], path)
-    return new_stdscr
 
 # ----------------------------------------------------------------------
 def collect_bms_files(root: Path) -> list[Path]:
@@ -608,12 +629,16 @@ def main(stdscr):
                             status_msg = None
                             # Store current selection before moving down
                             last_selected[path] = selected
-                            if is_allowed(new_path, allowed_roots):
-                                path = new_path.resolve()
+
+                            resolved_path = new_path.resolve()
+                            if is_allowed(resolved_path, allowed_roots):
+                                path = resolved_path
                                 selected = last_selected.get(path, 0)
                                 offset = 0
                                 preview_lines = None
                                 preview_file = None
+                            else:
+                                status_msg = f"Error: Directory is outside allowed roots ({chosen.name})"
                         else:
                             # File selected: open with configured launcher and return to browser
                             stdscr, status_msg = launch_external_app(stdscr, default_cmd_template, new_path)

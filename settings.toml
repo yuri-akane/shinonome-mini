@@ -128,6 +128,9 @@ speeddown_key = "KEY_DOWN"
 # SOLIDゲージ（初期値60%、クリア80%。ゲージ増減どちらも抑制、ゲージが100%に近いほど増加量減）
 solid_gauge = false
 
+# 空打ちPOOR判定（ノーツ手前で早押しした際にBAD・ゲージ減少ペナルティを与えるか）
+empty_poor = false
+
 # ロングノートの終端をノーツとして表示するか(Show end head of long notes)
 # 密度が高いとロングノートなのか連打なのか区別できなくなるので「終端非表示」のほうがよいです。
 show_ln_end_head = false

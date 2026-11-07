@@ -122,6 +122,7 @@ class Options:
     show_ln_end_head: bool = False
     show_result: bool = True
     stdout_result: bool = False
+    empty_poor: bool = False
     hispeed: float = 1.0
 
     def toggle_display_mode(self) -> None:
@@ -410,6 +411,7 @@ def load_options(args: argparse.Namespace | None = None, settings_path: str = "s
     opts.show_ln_end_head = play_opts.get('show_ln_end_head', opts.show_ln_end_head)
     opts.show_result = play_opts.get('show_result', opts.show_result)
     opts.stdout_result = play_opts.get('stdout_result', opts.stdout_result)
+    opts.empty_poor = play_opts.get('empty_poor', opts.empty_poor)
     opts.hispeed = float(play_opts.get('hispeed', opts.hispeed))
     opts.speedup_key = play_opts.get('speedup_key', opts.speedup_key)
     opts.speeddown_key = play_opts.get('speeddown_key', opts.speeddown_key)

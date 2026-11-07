@@ -70,6 +70,7 @@ def prepare_game_start(player, opts, channel_to_lane):
     player.hard_mode = opts.hard
     player.easy_mode = opts.easy and not opts.hard
     player.solid_gauge = opts.solid
+    player.empty_poor = getattr(opts, 'empty_poor', False)
     player.show_measure_lines = opts.show_measure_lines
     player.judgement_offset_ms = opts.judgement_offset_ms
     player.note_display_offset_ms = getattr(opts, 'note_display_offset_ms', 0)

@@ -251,7 +251,6 @@ normal gauge.
 - "white/green number"
 - constant/max/min hispeed
 - Acceleration of playback itself (e.g., 1.5× speed playback)
-- Empty hit POOR (none for now)
 - Folder division, random selection, course play, rank course
 
 ## TODO (to be verified later)
@@ -302,3 +301,5 @@ normal gauge.
 - 1.83 add tips
 - 1.84 misc（gauge inc to be 1/2 at autoscratch, improve fadeout, do not stdout_stats() at auto option.）
 - 1.85 duplicate removal on 01ch(BGM) setting, debug MixWaver Mode (also removal duplicated notes at the edge of pane and possible duplicated notes at LN-end-head）and some refactoring
+- 1.86 security update & refactor
+- 1.87 Empty hit POOR (optional; default:off)

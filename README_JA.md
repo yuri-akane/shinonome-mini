@@ -254,7 +254,6 @@ Shinonome-Mini -- Minimal Console BMS Player
 - "白/緑文字"
 - constant/max/min hispeed
 - 再生自体の加速（1.5倍速再生等）
-- 空打ちPOOR（とりあえずありません）
 - フォルダ分け、ランダム選択、course play、段位
 
 ## 継続確認
@@ -305,4 +304,5 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.83 tips追加
 - 1.84 細かい仕様変更（オートスクラッチの回復量を1/2に、曲終了時のフェードアウト改善、AUTOでstdout_statsしないように）
 - 1.85 01ch(BGM)の重複時の動作をユーザが設定(settings.toml)できるように、debug MixWaver Mode (pane端のノーツが今度は重複表示されることがあった、LN終点でノーツが重複する可能性があった）、その他リファクタリング
-
+- 1.86 security update & refactor
+- 1.87 空打ちPOOR（デフォルトはOFF）
