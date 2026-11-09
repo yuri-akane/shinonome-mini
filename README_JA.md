@@ -306,3 +306,4 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.85 01ch(BGM)の重複時の動作をユーザが設定(settings.toml)できるように、debug MixWaver Mode (pane端のノーツが今度は重複表示されることがあった、LN終点でノーツが重複する可能性があった）、その他リファクタリング
 - 1.86 security update & refactor
 - 1.87 空打ちPOOR（デフォルトはOFF）
+- 1.88 bmson仕様（拡張子のない音源定義）への対応、mode-hintが正常に読めていなかったのを修正、security update

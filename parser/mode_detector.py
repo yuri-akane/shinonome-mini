@@ -70,6 +70,14 @@ def detect_mode_from_bmson(raw_mode_hint: str, used_x: set[int], ext_is_pms: boo
         return "4K"
     elif raw_mode_hint in ("generic-6k", "beat-6k", "6k"):
         return "6K"
+    elif raw_mode_hint in ("beat-5k", "generic-5k"):
+        return "5K"
+    elif raw_mode_hint in ("beat-7k", "generic-7k"):
+        return "7K"
+    elif raw_mode_hint in ("beat-10k", "generic-10k"):
+        return "10K"
+    elif raw_mode_hint in ("beat-14k", "generic-14k"):
+        return "14K"
     elif ext_is_pms or (raw_mode_hint == "popn-9k"):
         return "9K"
     elif (

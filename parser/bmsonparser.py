@@ -8,8 +8,12 @@ from player.mine import is_mine_channel, decode_mine_damage, decode_mine_damage_
 from parser.mode_detector import detect_mode_from_bmson
 from parser.util import get_event_priority, filter_duplicate_01_events, build_timeline, calculate_event_times, resolve_ln_partners
 
-# 小節数の上限（メモリ枯渇 DoS 対策）
-_MAX_MEASURES = 1_000_000
+_MAX_MEASURES = 50_000        # 小節数の上限（メモリ枯渇 DoS 対策）
+_MAX_BEAT = _MAX_MEASURES * 4 # 許容する最大 beat (200,000 beat)
+_MAX_LINES = _MAX_MEASURES    # lines 配列の最大受け入れ件数
+
+# JSONファイルサイズの上限（デフォルト 20MB: 通常のbmsonは数MB以下）
+_MAX_JSON_FILE_SIZE = 20 * 1024 * 1024
 
 class BmsonParser:
     def __init__(self):
@@ -25,20 +29,26 @@ class BmsonParser:
         """bmson用の小節線追加処理"""
         if lines_data is not None:
             # bmson specification: lines 配列が定義されている場合はその指定位置のみ使用
-            for idx, line in enumerate(lines_data):
+            # lines の最大件数を _MAX_LINES に制限し、有効な y のみ追加
+            for idx, line in enumerate(lines_data[:_MAX_LINES]):
                 if "y" in line:
-                    events.append({
-                        "beat": line["y"] / resolution,
-                        "time": 0.0,
-                        "channel": "measure_line",
-                        "measure_idx": idx,
-                    })
+                    y_val = line["y"]
+                    if 0 <= y_val:
+                        beat = y_val / resolution
+                        if beat <= _MAX_BEAT:
+                            events.append({
+                                "beat": beat,
+                                "time": 0.0,
+                                "channel": "measure_line",
+                                "measure_idx": idx,
+                            })
         else:
             # lines が省略されている場合は 4拍間隔で max_beat まで自動生成
-            num_measures = min(int(max_beat / 4.0) + 2, _MAX_MEASURES)
+            clamped_max_beat = min(max_beat, float(_MAX_BEAT))
+            num_measures = min(int(clamped_max_beat / 4.0) + 2, _MAX_MEASURES)
             for idx in range(num_measures):
                 m_start_beat = idx * 4.0
-                if m_start_beat > max_beat:
+                if m_start_beat > clamped_max_beat:
                     break
                 events.append({
                     "beat": m_start_beat,
@@ -52,8 +62,22 @@ class BmsonParser:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"bmson file not found: {file_path}")
 
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        file_size = os.path.getsize(file_path)
+        if file_size > _MAX_JSON_FILE_SIZE:
+            raise ValueError(
+                f"bmson file too large ({file_size} bytes, limit is {_MAX_JSON_FILE_SIZE} bytes): {file_path}"
+            )
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise ValueError(f"Failed to parse bmson JSON: {e}") from e
+        except OSError as e:
+            raise OSError(f"Failed to read bmson file: {e}") from e
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Invalid bmson root structure: expected dict, got {type(data).__name__}")
 
         # 抽出する基本情報
         info_data = data.get('info', {})
@@ -165,7 +189,11 @@ class BmsonParser:
                 l = note.get('l', 0)
                 x = note.get('x', 0)
                 c = note.get('c', False)
+                if not (0 <= y):
+                    continue
                 beat = y / resolution
+                if beat > _MAX_BEAT:
+                    continue
                 sound_id_to_play = None if c else name_norm
 
                 if x in X_TO_CHANNEL_NORMAL:
@@ -173,6 +201,8 @@ class BmsonParser:
                         # Long Note: generate start and end events
                         ch = X_TO_CHANNEL_LN[x]
                         end_beat = (y + l) / resolution
+                        if end_beat > _MAX_BEAT:
+                            end_beat = float(_MAX_BEAT)
                         events.append({
                             'beat': beat,
                             'time': 0.0,
@@ -220,7 +250,11 @@ class BmsonParser:
                 y = note.get('y', 0)
                 x = note.get('x', 0)
                 damage = note.get('damage', 0)
+                if not (0 <= y):
+                    continue
                 beat = y / resolution
+                if beat > _MAX_BEAT:
+                    continue
 
                 if x in X_TO_CHANNEL_NORMAL:
                     ch = X_TO_CHANNEL_NORMAL[x]  # 通常チャンネルでレーンを引く
@@ -237,42 +271,49 @@ class BmsonParser:
         for bpm_ev in data.get('bpm_events', []):
             y = bpm_ev.get('y', 0)
             bpm_val = bpm_ev.get('bpm')
-            if bpm_val is not None:
-                events.append({
-                    'beat': y / resolution,
-                    'time': 0.0,
-                    'channel': '03',
-                    'bpm': float(bpm_val)
-                })
+            if 0 <= y and bpm_val is not None:
+                beat = y / resolution
+                if beat <= _MAX_BEAT:
+                    events.append({
+                        'beat': beat,
+                        'time': 0.0,
+                        'channel': '03',
+                        'bpm': float(bpm_val)
+                    })
 
         # Add STOP events
         for stop_ev in data.get('stop_events', []):
             y = stop_ev.get('y', 0)
             duration = stop_ev.get('duration', 0)
-            if duration > 0:
-                stop_val = 48.0 * duration / resolution
-                events.append({
-                    'beat': y / resolution,
-                    'time': 0.0,
-                    'channel': '09',
-                    'stop': float(stop_val)
-                })
+            if 0 <= y and duration > 0:
+                beat = y / resolution
+                if beat <= _MAX_BEAT:
+                    stop_val = 48.0 * duration / resolution
+                    events.append({
+                        'beat': beat,
+                        'time': 0.0,
+                        'channel': '09',
+                        'stop': float(stop_val)
+                    })
 
         # Add SCROLL events
         for scroll_ev in data.get('scroll_events', []):
             y = scroll_ev.get('y', 0)
-            rate_val = scroll_ev.get('rate', 1.0)
-            try:
-                rate_val = float(rate_val)
-            except (ValueError, TypeError):
-                rate_val = 1.0
-            rate_val = max(0.0, rate_val)
-            events.append({
-                'beat': y / resolution,
-                'time': 0.0,
-                'channel': 'SC',
-                'scroll': rate_val
-            })
+            if 0 <= y:
+                beat = y / resolution
+                if beat <= _MAX_BEAT:
+                    rate_val = scroll_ev.get('rate', 1.0)
+                    try:
+                        rate_val = float(rate_val)
+                    except (ValueError, TypeError):
+                        rate_val = 1.0
+                    rate_val = max(0.0, rate_val)
+                    events.append({
+                        'beat': beat,
+                        'time': 0.0,
+                        'channel': 'SC',
+                        'scroll': rate_val
+                    })
 
         # Add visual measure lines at the start of each measure
         max_beat = max((ev['beat'] for ev in events), default=0.0)

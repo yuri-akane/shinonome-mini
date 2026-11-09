@@ -152,9 +152,9 @@ def sanitize_wav_path(raw_path: str) -> str | None:
         if _INVALID_CHARS_RE.search(part):
             return None
 
-    # 5. Enforce allowed extensions.
+    # 5. Enforce allowed extensions (allow empty suffix for fallback search).
     ext = PurePosixPath(sanitized).suffix.lower()
-    if ext not in _ALLOWED_EXTENSIONS:
+    if ext and ext not in _ALLOWED_EXTENSIONS:
         return None
 
     # 6. Length check (total path length).

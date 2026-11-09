@@ -1,4 +1,4 @@
-# settings.toml – configuration for Shinonome Mini ver1.85+
+# settings.toml – configuration for Shinonome Mini ver1.88+
 
 #roots for bmsfd.py
 #ここをお持ちのbmsのpathに書き換えてください。
@@ -183,6 +183,7 @@ name = "Shinonome Mini (cnnm.py)"
 command = ["python3", "cnnm.py", "{file}"]
 #command = ["python3", "cnnm.py", "{file}", "-r", "on"] #引数も渡せます
 
+#以下実行ファイルは絶対パスで記述願います
 [launchers.bmz-player]
 name = "bmz-player"
 command = ["bmz-player", "{file}"]

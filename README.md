@@ -303,3 +303,4 @@ normal gauge.
 - 1.85 duplicate removal on 01ch(BGM) setting, debug MixWaver Mode (also removal duplicated notes at the edge of pane and possible duplicated notes at LN-end-head）and some refactoring
 - 1.86 security update & refactor
 - 1.87 Empty hit POOR (optional; default:off)
+- 1.88 bmson仕様（拡張子のない音源定義）への対応、mode-hintが正常に読めていなかったのを修正、security update
