@@ -5,9 +5,13 @@ import re
 from typing import Any
 from constants import get_channel_to_lane_map, NORMAL_CHANNELS, LN_CHANNELS
 from helpers.total import estimated_total
+from helpers.sanitizer import is_binary_file, safe_float, safe_int
 from player.mine import is_mine_channel, decode_mine_damage, decode_mine_damage_numeric
 from parser.mode_detector import detect_mode_from_bms
 from parser.util import get_event_priority, filter_duplicate_01_events, build_timeline, calculate_event_times, resolve_ln_partners
+
+# BMSファイルサイズの上限（デフォルト 20MB）
+_MAX_BMS_FILE_SIZE = 20 * 1024 * 1024
 
 class BmsParser:
     """Parse BMS files into a structured chart representation.
@@ -195,25 +199,33 @@ class BmsParser:
             info['artist'] = val
         elif key_upper == "BPM":
             try:
-                info['bpm'] = float(val)
+                v = safe_float(float(val))
+                if v is not None:
+                    info['bpm'] = v
             except Exception:
                 pass
         elif key_upper.startswith("BPM") and len(key_upper) > 3:
             id_36 = clean_id(key[3:])
             try:
-                info['bpm_table'][id_36] = float(val)
+                v = safe_float(float(val))
+                if v is not None:
+                    info['bpm_table'][id_36] = v
             except Exception:
                 pass
         elif key_upper.startswith("STOP") and len(key_upper) > 4:
             id_36 = clean_id(key[4:])
             try:
-                info['stop_table'][id_36] = float(val)
+                v = safe_float(float(val), min_val=0.0)
+                if v is not None:
+                    info['stop_table'][id_36] = v
             except Exception:
                 pass
         elif key_upper.startswith("SCROLL") and len(key_upper) > 6:
             id_36 = clean_id(key[6:])
             try:
-                info['scroll_table'][id_36] = float(val)
+                v = safe_float(float(val))
+                if v is not None:
+                    info['scroll_table'][id_36] = v
             except Exception:
                 pass
         elif key_upper == "RANK":
@@ -223,7 +235,9 @@ class BmsParser:
                 pass
         elif key_upper == "TOTAL":
             try:
-                info['total'] = float(val)
+                v = safe_float(float(val), min_val=0.0)
+                if v is not None:
+                    info['total'] = v
             except Exception:
                 pass
         elif key_upper == "LNOBJ":
@@ -261,8 +275,8 @@ class BmsParser:
         measure_idx = int(measure)
         if channel == "02":
             try:
-                multiplier = float(data_str)
-                if multiplier > 0 and 0 <= measure_idx < 1000:
+                multiplier = safe_float(float(data_str), min_val=1e-9)
+                if multiplier is not None and 0 <= measure_idx < 1000:
                     measures_multiplier[measure_idx] = multiplier
             except Exception:
                 pass
@@ -279,6 +293,15 @@ class BmsParser:
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"BMS file not found: {file_path}")
+
+        file_size = os.path.getsize(file_path)
+        if file_size > _MAX_BMS_FILE_SIZE:
+            raise ValueError(
+                f"BMS file too large ({file_size} bytes, limit is {_MAX_BMS_FILE_SIZE} bytes): {file_path}"
+            )
+
+        if is_binary_file(file_path):
+            raise ValueError(f"Binary file detected (contains NUL bytes): {file_path}")
 
         info = {
             'title': '',
@@ -365,8 +388,8 @@ class BmsParser:
                 if channel == "03":
                     # 16進数の値がそのままBPM値
                     try:
-                        bpm_val = float(int(obj, 16))
-                    except:
+                        bpm_val = safe_float(float(int(obj, 16)))
+                    except Exception:
                         pass
                 elif channel == "08":
                     # 拡張BPMテーブル（36/62進数定義）から参照

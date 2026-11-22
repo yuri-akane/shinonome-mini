@@ -16,27 +16,27 @@ class MwRenderer(BaseRenderer):
         self.last_judge_x = self.lane_x
         self.frozen_active_pane: str | None = None  # 'upper' or 'lower'。None=通常モード
         self.frozen_judge_x: int = self.lane_x      # ギミック突入時の judge_x を凍結
-        self.frozen_start_beat_upper: float = 0.0   # ギミック突入時のUpper小節開始ビート
-        self.frozen_start_beat_lower: float = 0.0   # ギミック突入時のLower小節開始ビート
-        self.frozen_beat: float = 0.0               # ギミック突入時の基準ビート
-        self.visual_beat_offset: float = 0.0        # ギミック終了後の表示ビート補正量
-        self.last_current_beat: float = 0.0         # 前フレームのbeat位置（速度検出用）
+        self.frozen_start_height_upper: float = 0.0 # ギミック突入時のUpperウィンドウ開始高さ
+        self.frozen_start_height_lower: float = 0.0 # ギミック突入時のLowerウィンドウ開始高さ
+        self.frozen_height: float = 0.0             # ギミック突入時の基準累積高さ
+        self.visual_height_offset: float = 0.0      # ギミック終了後の表示高さ補正量
+        self.last_current_height: float = 0.0       # 前フレームのheight位置（速度検出用）
         self.last_time_sec: float | None = None     # 前フレームの時刻
         self.last_active_pane: str = 'upper'        # 前フレームの正常active_pane（凍結先決定用）
-        self.last_start_beat_upper: float = 0.0     # 前フレームのUpper小節開始ビート
-        self.last_start_beat_lower: float = 0.0     # 前フレームのLower小節開始ビート
+        self.last_start_height_upper: float = 0.0   # 前フレームのUpperウィンドウ開始高さ
+        self.last_start_height_lower: float = 0.0   # 前フレームのLowerウィンドウ開始高さ
         self.last_bpm_sign: int = 1                 # 前フレームのBPM符号 (+1 or -1)
 
 
-    def _render_pane(self, stdscr, pane_title: str, start_y: int, start_beat: float, beats_per_window: float,
-                     beat_width: float, track_width: int, is_active: bool, current_beat: float, current_time: float,
+    def _render_pane(self, stdscr, pane_title: str, start_y: int, start_height: float, heights_per_window: float,
+                     height_width: float, track_width: int, is_active: bool, current_height: float, current_time: float,
                      events: list, event_index: int, player, lane_chars, opts, max_y: int, max_x: int,
                      key_names: list = None, use_fixed_judge: bool = False,
-                     flipbook_partner_pane: bool = False, partner_offset_beats: float = 0.0,
-                     visual_beat_offset: float = 0.0, is_reverse_bpm: bool = False,
+                     flipbook_partner_pane: bool = False, partner_offset_heights: float = 0.0,
+                     visual_height_offset: float = 0.0, is_reverse_bpm: bool = False,
                      rendered_events: set = None):
 
-        end_beat = start_beat + beats_per_window
+        end_height = start_height + heights_per_window
         dp_offset = 1 if (self.is_dp and self.half > 0) else 0
 
         # Draw Pane Title Header & Top Border (横幅100%)
@@ -76,26 +76,37 @@ class MwRenderer(BaseRenderer):
         if bottom_y < max_y - 1:
             self.safe_addstr(stdscr, bottom_y, 0, bot_border, curses.A_DIM)
 
-        # 判定ラインX座標の決定（高速ギミック時は凍結座標、通常時は進行beatに応じた位置）
+        # 判定ラインX座標の決定（高速ギミック時は凍結座標、通常時は進行heightに応じた位置）
         if use_fixed_judge:
             judge_x = self.frozen_judge_x
         else:
-            judge_rel_beat = max(0.0, min(beats_per_window, current_beat - start_beat))
+            judge_rel_height = max(0.0, min(heights_per_window, current_height - start_height))
             if is_reverse_bpm:
                 # 負BPM時は右端から左端へ進行
-                judge_x = self.lane_x + track_width - 1 - int(round(judge_rel_beat * beat_width))
+                judge_x = self.lane_x + track_width - 1 - int(round(judge_rel_height * height_width))
             else:
                 # 正BPM時は左端から右端へ進行
-                judge_x = self.lane_x + int(round(judge_rel_beat * beat_width))
+                judge_x = self.lane_x + int(round(judge_rel_height * height_width))
             if is_active:
                 self.last_judge_x = judge_x
 
-        # Helper: beatからX座標を算出（is_reverse_bpm対応）
-        def calc_x_from_disp_beat(d_beat: float) -> int:
+        # Helper: heightからX座標を算出（is_reverse_bpm対応）
+        def calc_x_from_disp_height(d_height: float) -> int:
             if is_reverse_bpm:
-                return self.lane_x + track_width - 1 - int(round((d_beat - start_beat) * beat_width))
+                return self.lane_x + track_width - 1 - int(round((d_height - start_height) * height_width))
             else:
-                return self.lane_x + int(round((d_beat - start_beat) * beat_width))
+                return self.lane_x + int(round((d_height - start_height) * height_width))
+
+        # Helper: イベントの累積表示高さを取得（キャッシュを活用して高速化）
+        def get_ev_height(ev: dict) -> float:
+            h = ev.get('_mw_height')
+            if h is None:
+                if getattr(player, 'timeline', None):
+                    h = player.timeline.get_height_at_beat(ev.get('beat', 0.0))
+                else:
+                    h = ev.get('beat', 0.0)
+                ev['_mw_height'] = h
+            return h
 
         # Draw Measure Lines
         show_m_lines = getattr(opts, 'show_measure_lines', True) if opts else True
@@ -105,24 +116,24 @@ class MwRenderer(BaseRenderer):
                 if event.get('channel') != 'measure_line':
                     continue
 
-                ev_beat = event.get('beat', 0.0)
+                ev_height = get_ev_height(event)
                 if use_fixed_judge:
-                    if ev_beat < current_beat - beats_per_window:
+                    if ev_height < current_height - heights_per_window:
                         continue
-                    if ev_beat > current_beat + beats_per_window * 2:
+                    if ev_height > current_height + heights_per_window * 2:
                         break
                     if flipbook_partner_pane:
-                        m_x = self.lane_x + int(round((ev_beat - current_beat - partner_offset_beats) * beat_width))
+                        m_x = self.lane_x + int(round((ev_height - current_height - partner_offset_heights) * height_width))
                     else:
-                        m_x = judge_x + int(round((ev_beat - current_beat) * beat_width))
+                        m_x = judge_x + int(round((ev_height - current_height) * height_width))
                 else:
-                    disp_m_beat = ev_beat - visual_beat_offset
+                    disp_m_height = ev_height - visual_height_offset
                     # 左端セル (m_x == lane_x) に丸め込まれる直前の微小オフセットまで受け入れる
-                    if disp_m_beat < start_beat - (0.5 / beat_width):
+                    if disp_m_height < start_height - (0.5 / height_width):
                         continue
-                    if disp_m_beat >= end_beat + 1.0:
+                    if disp_m_height >= end_height + 1.0:
                         break
-                    raw_m_x = calc_x_from_disp_beat(disp_m_beat)
+                    raw_m_x = calc_x_from_disp_height(disp_m_height)
                     # 右端枠外 (raw_m_x >= lane_x + track_width) は右端に押し込まず次ペインに任せる
                     if not (self.lane_x <= raw_m_x < self.lane_x + track_width):
                         continue
@@ -152,18 +163,18 @@ class MwRenderer(BaseRenderer):
             if lane_idx is None or lane_idx >= self.lane_count:
                 continue
 
-            s_beat = start_ev.get('beat', 0.0)
-            e_beat = event.get('beat', 0.0)
+            s_height = get_ev_height(start_ev)
+            e_height = get_ev_height(event)
 
             if use_fixed_judge:
-                if e_beat < current_beat - beats_per_window:
+                if e_height < current_height - heights_per_window:
                     continue
-                if s_beat > current_beat + beats_per_window * 2:
+                if s_height > current_height + heights_per_window * 2:
                     continue
             else:
-                disp_s_beat = s_beat - visual_beat_offset
-                disp_e_beat = e_beat - visual_beat_offset
-                if disp_e_beat < start_beat or disp_s_beat > end_beat:
+                disp_s_height = s_height - visual_height_offset
+                disp_e_height = e_height - visual_height_offset
+                if disp_e_height < start_height or disp_s_height > end_height:
                     continue
 
             offset = 1 if (self.is_dp and self.half > 0 and lane_idx >= self.half) else 0
@@ -173,20 +184,20 @@ class MwRenderer(BaseRenderer):
 
             if use_fixed_judge:
                 if flipbook_partner_pane:
-                    x_start_ln = self.lane_x + int(round((s_beat - current_beat - partner_offset_beats) * beat_width))
-                    x_end_ln   = self.lane_x + int(round((e_beat - current_beat - partner_offset_beats) * beat_width))
+                    x_start_ln = self.lane_x + int(round((s_height - current_height - partner_offset_heights) * height_width))
+                    x_end_ln   = self.lane_x + int(round((e_height - current_height - partner_offset_heights) * height_width))
                 else:
-                    x_start_ln = judge_x + int(round((s_beat - current_beat) * beat_width))
-                    x_end_ln   = judge_x + int(round((e_beat - current_beat) * beat_width))
+                    x_start_ln = judge_x + int(round((s_height - current_height) * height_width))
+                    x_end_ln   = judge_x + int(round((e_height - current_height) * height_width))
             else:
-                disp_s_beat = s_beat - visual_beat_offset
-                disp_e_beat = e_beat - visual_beat_offset
+                disp_s_height = s_height - visual_height_offset
+                disp_e_height = e_height - visual_height_offset
                 if is_reverse_bpm:
-                    x_start_ln = self.lane_x + track_width - 1 - int(round(max(0.0, disp_s_beat - start_beat) * beat_width))
-                    x_end_ln   = self.lane_x + track_width - 1 - int(round(min(beats_per_window, disp_e_beat - start_beat) * beat_width))
+                    x_start_ln = self.lane_x + track_width - 1 - int(round(max(0.0, disp_s_height - start_height) * height_width))
+                    x_end_ln   = self.lane_x + track_width - 1 - int(round(min(heights_per_window, disp_e_height - start_height) * height_width))
                 else:
-                    x_start_ln = self.lane_x + int(round(max(0.0, disp_s_beat - start_beat) * beat_width))
-                    x_end_ln   = self.lane_x + int(round(min(beats_per_window, disp_e_beat - start_beat) * beat_width))
+                    x_start_ln = self.lane_x + int(round(max(0.0, disp_s_height - start_height) * height_width))
+                    x_end_ln   = self.lane_x + int(round(min(heights_per_window, disp_e_height - start_height) * height_width))
 
             x_start_ln = max(self.lane_x, min(x_start_ln, self.lane_x + track_width - 1))
             x_end_ln   = max(self.lane_x, min(x_end_ln, self.lane_x + track_width - 1))
@@ -208,14 +219,14 @@ class MwRenderer(BaseRenderer):
             ch = lane_chars.get(lane_idx, "*") if isinstance(lane_chars, dict) else lane_chars[lane_idx]
             head_char = ch[0] if isinstance(ch, str) and len(ch) > 0 else "*"
 
-            # LNヘッド：ギミック時はBeat範囲条件をX座標範囲で代替
-            disp_s = s_beat if use_fixed_judge else (s_beat - visual_beat_offset)
-            disp_e = e_beat if use_fixed_judge else (e_beat - visual_beat_offset)
+            # LNヘッド：ギミック時はHeight範囲条件をX座標範囲で代替
+            disp_s = s_height if use_fixed_judge else (s_height - visual_height_offset)
+            disp_e = e_height if use_fixed_judge else (e_height - visual_height_offset)
             head_ev_id = id(start_ev)
             already_drawn_head = (rendered_events is not None and head_ev_id in rendered_events)
             show_head = (
                 not already_drawn_head
-                and (use_fixed_judge or (start_beat - (0.5 / beat_width) <= disp_s < end_beat - (0.5 / beat_width)))
+                and (use_fixed_judge or (start_height - (0.5 / height_width) <= disp_s < end_height - (0.5 / height_width)))
                 and not start_ev.get('manual_hit')
                 and (current_time < start_ev.get('time', 0.0))
             )
@@ -232,7 +243,7 @@ class MwRenderer(BaseRenderer):
             already_drawn_tail = (rendered_events is not None and tail_ev_id in rendered_events)
             show_tail = (
                 not already_drawn_tail
-                and (use_fixed_judge or (start_beat - (0.5 / beat_width) <= disp_e < end_beat - (0.5 / beat_width)))
+                and (use_fixed_judge or (start_height - (0.5 / height_width) <= disp_e < end_height - (0.5 / height_width)))
             )
             if show_tail:
                 if self.lane_x <= x_end_ln < self.lane_x + track_width:
@@ -264,28 +275,28 @@ class MwRenderer(BaseRenderer):
             if lane_idx is None or lane_idx >= self.lane_count:
                 continue
 
-            ev_beat = event.get('beat', 0.0)
+            ev_height = get_ev_height(event)
             if use_fixed_judge:
-                if ev_beat < current_beat - beats_per_window:
+                if ev_height < current_height - heights_per_window:
                     continue
-                if ev_beat > current_beat + beats_per_window * 2:
+                if ev_height > current_height + heights_per_window * 2:
                     break
                 if flipbook_partner_pane:
-                    note_x = self.lane_x + int(round((ev_beat - current_beat - partner_offset_beats) * beat_width))
+                    note_x = self.lane_x + int(round((ev_height - current_height - partner_offset_heights) * height_width))
                 else:
-                    note_x = judge_x + int(round((ev_beat - current_beat) * beat_width))
+                    note_x = judge_x + int(round((ev_height - current_height) * height_width))
                 note_x = max(self.lane_x, min(note_x, self.lane_x + track_width - 1))
                 if not (self.lane_x <= note_x < self.lane_x + track_width):
                     continue
             else:
-                disp_ev_beat = ev_beat - visual_beat_offset
+                disp_ev_height = ev_height - visual_height_offset
                 # 左端セル (note_x == lane_x) に四捨五入される直前の微小オフセットまで受け入れる
                 # これにより、小節境界直前のノーツが次ペインの左端で確実に拾われる
-                if disp_ev_beat < start_beat - (0.5 / beat_width):
+                if disp_ev_height < start_height - (0.5 / height_width):
                     continue
-                if disp_ev_beat >= end_beat + 1.0:
+                if disp_ev_height >= end_height + 1.0:
                     break
-                raw_x = calc_x_from_disp_beat(disp_ev_beat)
+                raw_x = calc_x_from_disp_height(disp_ev_height)
                 # 右端枠外 (raw_x >= lane_x + track_width) のノーツは右端に押し込まずスキップ（次ペインの左端に委ねる）
                 # 左端枠外 (raw_x < lane_x) のノーツも前ペインの領域外なのでスキップ
                 if not (self.lane_x <= raw_x < self.lane_x + track_width):
@@ -332,6 +343,11 @@ class MwRenderer(BaseRenderer):
         draw_time = self.get_draw_time(current_time, opts)
         scale, player_height, current_bpm = self.calculate_scale_and_state(player, draw_time, initial_bpm, opts)
 
+        # 楽曲本来の進行拍数（小節番号表示用）
+        current_logical_beat = 0.0
+        if getattr(player, 'timeline', None):
+            current_logical_beat, _, _, _ = player.timeline.get_state(draw_time)
+
         max_y, max_x = stdscr.getmaxyx()
         available_width = max(20, max_x - self.lane_x)
 
@@ -348,25 +364,24 @@ class MwRenderer(BaseRenderer):
         max_score = player.total_playable_notes * 2
         self.safe_addstr(stdscr, 2, 45 + len(gauge_str) + 2, f"EX: {player.ex_score:4d}/{max_score:4d} | COMBO: {player.combo:4d}")
 
-        # Calculate beat progression & measure windows for 2-pane alternating sweep
-        beats_per_window = 4.0 / max(0.01, opts.hispeed)
+        # Calculate height progression & measure windows for 2-pane alternating sweep
+        heights_per_window = 4.0 / max(0.01, opts.hispeed)
         track_width = max(1, available_width - 1)
-        beat_width = max(1.0, track_width / beats_per_window)
+        height_width = max(1.0, track_width / heights_per_window)
 
-        current_beat = player_height
+        current_height = player_height
 
         # BPMの正負切り替え（反転）検出
         current_bpm_sign = -1 if current_bpm < 0 else 1
         if self.last_bpm_sign != current_bpm_sign and self.last_time_sec is not None:
-            # 切り替わり前の表示beatにおけるウィンドウ内位置（進行度）
-            old_display_beat = current_beat - self.visual_beat_offset
-            rel_in_window = old_display_beat % beats_per_window
-            # 正負反転時に judge_x が跳ばないよう、ウィンドウ内の進行度を (beats_per_window - rel) に折り返す
-            # 新しい offset を加減算して、(current_beat - new_offset) % beats_per_window == beats_per_window - rel_in_window となるように調整
-            delta_offset = 2.0 * rel_in_window - beats_per_window
-            self.visual_beat_offset += delta_offset
+            # 切り替わり前の表示heightにおけるウィンドウ内位置（進行度）
+            old_display_height = current_height - self.visual_height_offset
+            rel_in_window = old_display_height % heights_per_window
+            # 正負反転時に judge_x が跳ばないよう、ウィンドウ内の進行度を (heights_per_window - rel) に折り返す
+            delta_offset = 2.0 * rel_in_window - heights_per_window
+            self.visual_height_offset += delta_offset
 
-        display_beat = current_beat - self.visual_beat_offset
+        display_height = current_height - self.visual_height_offset
 
         # --- 判定ライン移動速度および高速BPMギミック検出 ---
         # 1. タイムラインセグメントの現在BPM判定（STOP中や超高速セグメントの安定検出）
@@ -384,100 +399,112 @@ class MwRenderer(BaseRenderer):
         # 2. 1フレームあたりの変化速度判定（急激な変化）
         # ※ BPM符号反転による折り返しは正常な方向転換なのでジャンプ検出から除外
         dt = (draw_time - self.last_time_sec) if self.last_time_sec is not None else 0.0
-        delta_beat = abs(current_beat - self.last_current_beat) if self.last_time_sec is not None else 0.0
-        delta_judge_px = delta_beat * beat_width
+        delta_height = abs(current_height - self.last_current_height) if self.last_time_sec is not None else 0.0
+        delta_judge_px = delta_height * height_width
         speed_threshold_px = max(10.0, track_width * 0.25)
         bpm_switched = (self.last_bpm_sign != current_bpm_sign)
-        is_fast_jump = not bpm_switched and ((delta_judge_px >= speed_threshold_px) or (delta_beat >= beats_per_window * 0.4))
+        is_fast_jump = not bpm_switched and ((delta_judge_px >= speed_threshold_px) or (delta_height >= heights_per_window * 0.4))
 
         # どちらかを満たすか、あるいは一度凍結された後で急変状態が収まるまではギミックモードを維持
         use_fixed_judge = is_high_bpm or is_fast_jump or (self.frozen_active_pane is not None and is_high_bpm)
 
-        # 通常スキャン小節計算（表示用 display_beat を基準）
-        measure_idx = int(display_beat // beats_per_window)
+        # 通常スキャンウィンドウ計算（表示用 display_height を基準）
+        measure_idx = int(display_height // heights_per_window)
         if measure_idx % 2 == 0:
             active_pane = 'upper'
-            start_beat_upper = measure_idx * beats_per_window
-            start_beat_lower = (measure_idx + 1) * beats_per_window
+            start_height_upper = measure_idx * heights_per_window
+            start_height_lower = (measure_idx + 1) * heights_per_window
         else:
             active_pane = 'lower'
-            start_beat_upper = (measure_idx + 1) * beats_per_window
-            start_beat_lower = measure_idx * beats_per_window
+            start_height_upper = (measure_idx + 1) * heights_per_window
+            start_height_lower = measure_idx * heights_per_window
 
         dp_extra = 1 if (self.is_dp and self.half > 0) else 0
 
         # --- Flipbook凍結管理 ---
         if use_fixed_judge:
             if self.frozen_active_pane is None:
-                # ギミック突入: 直前の正常フレームでのPane、判定ライン、小節開始位置を凍結
+                # ギミック突入: 直前の正常フレームでのPane、判定ライン、ウィンドウ開始位置を凍結
                 self.frozen_active_pane = self.last_active_pane
                 self.frozen_judge_x = self.last_judge_x
-                self.frozen_start_beat_upper = self.last_start_beat_upper
-                self.frozen_start_beat_lower = self.last_start_beat_lower
-                self.frozen_beat = self.last_current_beat
-            # ギミック中は小節番号・基準ビートも凍結時の値に固定し、Paneタイトルの目まぐるしい反転やズレを防ぐ
-            disp_start_beat_upper = self.frozen_start_beat_upper
-            disp_start_beat_lower = self.frozen_start_beat_lower
+                self.frozen_start_height_upper = self.last_start_height_upper
+                self.frozen_start_height_lower = self.last_start_height_lower
+                self.frozen_height = self.last_current_height
+            # ギミック中は小節番号・基準heightも凍結時の値に固定し、Paneタイトルの目まぐるしい反転やズレを防ぐ
+            disp_start_height_upper = self.frozen_start_height_upper
+            disp_start_height_lower = self.frozen_start_height_lower
             upper_is_active = (self.frozen_active_pane == 'upper')
             lower_is_active = (self.frozen_active_pane == 'lower')
             upper_flipbook_partner = not upper_is_active
             lower_flipbook_partner = not lower_is_active
-            pass_beat = current_beat
+            pass_height = current_height
         else:
             # ギミック終了（通常スキャンへ復帰）
             if self.frozen_active_pane is not None:
                 # 終了の瞬間: 凍結されていた位置からそのままスキャンが再開するようにオフセットを確定
-                self.visual_beat_offset += (current_beat - self.frozen_beat)
+                self.visual_height_offset += (current_height - self.frozen_height)
                 self.frozen_active_pane = None
-                display_beat = current_beat - self.visual_beat_offset
-                measure_idx = int(display_beat // beats_per_window)
+                display_height = current_height - self.visual_height_offset
+                measure_idx = int(display_height // heights_per_window)
                 if measure_idx % 2 == 0:
                     active_pane = 'upper'
-                    start_beat_upper = measure_idx * beats_per_window
-                    start_beat_lower = (measure_idx + 1) * beats_per_window
+                    start_height_upper = measure_idx * heights_per_window
+                    start_height_lower = (measure_idx + 1) * heights_per_window
                 else:
                     active_pane = 'lower'
-                    start_beat_upper = (measure_idx + 1) * beats_per_window
-                    start_beat_lower = measure_idx * beats_per_window
+                    start_height_upper = (measure_idx + 1) * heights_per_window
+                    start_height_lower = measure_idx * heights_per_window
 
-            disp_start_beat_upper = start_beat_upper
-            disp_start_beat_lower = start_beat_lower
+            disp_start_height_upper = start_height_upper
+            disp_start_height_lower = start_height_lower
             upper_is_active = (active_pane == 'upper')
             lower_is_active = (active_pane == 'lower')
             upper_flipbook_partner = False
             lower_flipbook_partner = False
-            pass_beat = display_beat
+            pass_height = display_height
 
         draw_start_idx = self.get_draw_start_index(events, draw_time, lookback_sec=10.0)
         rendered_events = None if use_fixed_judge else set()
 
+        # 小節番号の決定（実際の楽曲小節番号に連動）
+        if getattr(player, 'timeline', None) and getattr(player.timeline, 'measure_beats', None):
+            cur_measure = bisect.bisect_right(player.timeline.measure_beats, current_logical_beat)
+        else:
+            cur_measure = int(current_logical_beat // 4.0) + 1
+        cur_measure = max(1, cur_measure)
+
+        if upper_is_active:
+            m_num_upper = cur_measure
+            m_num_lower = cur_measure + 1
+        else:
+            m_num_upper = cur_measure + 1
+            m_num_lower = cur_measure
+
         # Render Upper Pane
         upper_start_y = 3
-        m_num_upper = int(disp_start_beat_upper // beats_per_window) + 1
         upper_title = f"UPPER PANE - Measure {m_num_upper}" + (" [ACTIVE]" if upper_is_active else " [PREVIEW]")
-        self._render_pane(stdscr, upper_title, upper_start_y, disp_start_beat_upper, beats_per_window,
-                          beat_width, track_width, upper_is_active, pass_beat, draw_time,
+        self._render_pane(stdscr, upper_title, upper_start_y, disp_start_height_upper, heights_per_window,
+                          height_width, track_width, upper_is_active, pass_height, draw_time,
                           events, draw_start_idx, player, lane_chars, opts, max_y, max_x,
                           key_names=key_names, use_fixed_judge=use_fixed_judge,
                           flipbook_partner_pane=upper_flipbook_partner,
-                          partner_offset_beats=beats_per_window,
-                          visual_beat_offset=self.visual_beat_offset,
+                          partner_offset_heights=heights_per_window,
+                          visual_height_offset=self.visual_height_offset,
                           is_reverse_bpm=(current_bpm < 0),
                           rendered_events=rendered_events)
 
         # Render Lower Pane
         lower_start_y = upper_start_y + 2 + self.lane_count + dp_extra
-        m_num_lower = int(disp_start_beat_lower // beats_per_window) + 1
         lower_title = f"LOWER PANE - Measure {m_num_lower}" + (" [ACTIVE]" if lower_is_active else " [PREVIEW]")
-        self._render_pane(stdscr, lower_title, lower_start_y, disp_start_beat_lower, beats_per_window,
-                          track_width=track_width, beat_width=beat_width, is_active=lower_is_active,
-                          current_beat=pass_beat, current_time=draw_time,
+        self._render_pane(stdscr, lower_title, lower_start_y, disp_start_height_lower, heights_per_window,
+                          track_width=track_width, height_width=height_width, is_active=lower_is_active,
+                          current_height=pass_height, current_time=draw_time,
                           events=events, event_index=draw_start_idx, player=player,
                           lane_chars=lane_chars, opts=opts, max_y=max_y, max_x=max_x,
                           key_names=key_names, use_fixed_judge=use_fixed_judge,
                           flipbook_partner_pane=lower_flipbook_partner,
-                          partner_offset_beats=beats_per_window,
-                          visual_beat_offset=self.visual_beat_offset,
+                          partner_offset_heights=heights_per_window,
+                          visual_height_offset=self.visual_height_offset,
                           is_reverse_bpm=(current_bpm < 0),
                           rendered_events=rendered_events)
 
@@ -496,12 +523,11 @@ class MwRenderer(BaseRenderer):
         # 次フレームの速度計算・凍結判定用に通常状態を更新（通常時のみ最新状態を記録）
         if not use_fixed_judge:
             self.last_active_pane = active_pane
-            self.last_start_beat_upper = start_beat_upper
-            self.last_start_beat_lower = start_beat_lower
-        self.last_current_beat = current_beat
+            self.last_start_height_upper = start_height_upper
+            self.last_start_height_lower = start_height_lower
+        self.last_current_height = current_height
         self.last_time_sec = draw_time
         self.last_bpm_sign = current_bpm_sign
 
         # Handle Keyboard & Input Loop
         self.process_input(stdscr, player, auto_play, opts, key_to_lane, use_pynput, get_key_events)
-

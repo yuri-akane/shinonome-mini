@@ -150,6 +150,7 @@ class Options:
     # Audio
     sample_rate: int = 24000
     nchannels: int = 2
+    max_memory_mb: int = 1024
 
     # BMS
     bms_encoding: str = "cp932"
@@ -435,10 +436,13 @@ def load_options(args: argparse.Namespace | None = None, settings_path: str = "s
     audio_cfg = toml_data.get('audio', {})
     sample_rate = audio_cfg.get('sample_rate', opts.sample_rate)
     nchannels = audio_cfg.get('nchannels', opts.nchannels)
+    max_mem = audio_cfg.get('max_memory_mb', opts.max_memory_mb)
     if isinstance(sample_rate, int) and sample_rate > 0:
         opts.sample_rate = sample_rate
     if nchannels in (1, 2):
         opts.nchannels = nchannels
+    if isinstance(max_mem, (int, float)) and max_mem > 0:
+        opts.max_memory_mb = int(max_mem)
 
     # BMS section
     bms_cfg = toml_data.get('bms', {})

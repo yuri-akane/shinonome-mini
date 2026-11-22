@@ -235,6 +235,7 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 特殊なノーツの落ち方（加速、減速、逆流、ゆらゆら、など）
    - マイナスBPMと負のSCROLL（逆流）はある程度は動作確認しています。
    - マイナスBPMは独自実装で、他のプレイヤーの動作と異なります。
+- 負の値のSTOP
 - midi対応
 - mp3は再生できますが音ズレがあるのでおすすめしません
 - preview
@@ -253,7 +254,7 @@ Shinonome-Mini -- Minimal Console BMS Player
 - SLOW/FAST表示、
 - "白/緑文字"
 - constant/max/min hispeed
-- 再生自体の加速（1.5倍速再生等）
+- FREQ,PITCH,SPEED等の再生自体の加速（1.5倍速再生）等
 - フォルダ分け、ランダム選択、course play、段位
 
 ## 継続確認
@@ -307,3 +308,6 @@ Shinonome-Mini -- Minimal Console BMS Player
 - 1.86 security update & refactor
 - 1.87 空打ちPOOR（デフォルトはOFF）
 - 1.88 bmson仕様（拡張子のない音源定義）への対応、mode-hintが正常に読めていなかったのを修正、security update
+- 1.89 security update (check filesize and detect text/binary)、音声展開メモリの上限設定
+- 1.90 security update (check audio duration, Nan/inf value)
+- 1.91 MixWaver Modeで#SCROLLに対応できていなかったのを修正

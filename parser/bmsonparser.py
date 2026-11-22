@@ -4,6 +4,7 @@ import re
 
 from typing import Any, Optional
 from constants import get_channel_to_lane_map
+from helpers.sanitizer import is_binary_file, safe_float, safe_int
 from player.mine import is_mine_channel, decode_mine_damage, decode_mine_damage_numeric
 from parser.mode_detector import detect_mode_from_bmson
 from parser.util import get_event_priority, filter_duplicate_01_events, build_timeline, calculate_event_times, resolve_ln_partners
@@ -32,8 +33,8 @@ class BmsonParser:
             # lines の最大件数を _MAX_LINES に制限し、有効な y のみ追加
             for idx, line in enumerate(lines_data[:_MAX_LINES]):
                 if "y" in line:
-                    y_val = line["y"]
-                    if 0 <= y_val:
+                    y_val = safe_float(line["y"], min_val=0.0)
+                    if y_val is not None:
                         beat = y_val / resolution
                         if beat <= _MAX_BEAT:
                             events.append({
@@ -68,6 +69,9 @@ class BmsonParser:
                 f"bmson file too large ({file_size} bytes, limit is {_MAX_JSON_FILE_SIZE} bytes): {file_path}"
             )
 
+        if is_binary_file(file_path):
+            raise ValueError(f"Binary file detected (contains NUL bytes): {file_path}")
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -84,6 +88,7 @@ class BmsonParser:
         resolution = info_data.get('resolution', 480)
         if not isinstance(resolution, (int, float)) or resolution <= 0:
             resolution = 480
+        resolution = safe_int(resolution, min_val=1, default=480)
 
         ext_is_pms = file_path.lower().endswith('.pms')
         raw_mode_hint = str(info_data.get('mode_hint', '')).lower().strip()
@@ -181,7 +186,7 @@ class BmsonParser:
             
             # polyphony があればパースし、なければデフォルト 1
             polyphony = channel.get('polyphony', 1)
-            polyphony_table[name_norm] = int(polyphony)
+            polyphony_table[name_norm] = safe_int(polyphony, min_val=1, default=1)
 
             notes = channel.get('notes', [])
             for note in notes:
@@ -189,8 +194,10 @@ class BmsonParser:
                 l = note.get('l', 0)
                 x = note.get('x', 0)
                 c = note.get('c', False)
-                if not (0 <= y):
+                y = safe_float(y, min_val=0.0)
+                if y is None:
                     continue
+                l = safe_float(l, min_val=0.0, default=0.0)
                 beat = y / resolution
                 if beat > _MAX_BEAT:
                     continue
@@ -250,7 +257,8 @@ class BmsonParser:
                 y = note.get('y', 0)
                 x = note.get('x', 0)
                 damage = note.get('damage', 0)
-                if not (0 <= y):
+                y = safe_float(y, min_val=0.0)
+                if y is None:
                     continue
                 beat = y / resolution
                 if beat > _MAX_BEAT:
@@ -271,21 +279,25 @@ class BmsonParser:
         for bpm_ev in data.get('bpm_events', []):
             y = bpm_ev.get('y', 0)
             bpm_val = bpm_ev.get('bpm')
-            if 0 <= y and bpm_val is not None:
+            y = safe_float(y, min_val=0.0)
+            bpm_val = safe_float(bpm_val)  # 負BPM可、NaN/inf のみ弾く
+            if y is not None and bpm_val is not None:
                 beat = y / resolution
                 if beat <= _MAX_BEAT:
                     events.append({
                         'beat': beat,
                         'time': 0.0,
                         'channel': '03',
-                        'bpm': float(bpm_val)
+                        'bpm': bpm_val
                     })
 
         # Add STOP events
         for stop_ev in data.get('stop_events', []):
             y = stop_ev.get('y', 0)
             duration = stop_ev.get('duration', 0)
-            if 0 <= y and duration > 0:
+            y = safe_float(y, min_val=0.0)
+            duration = safe_float(duration, min_val=0.0)
+            if y is not None and duration is not None and duration > 0:
                 beat = y / resolution
                 if beat <= _MAX_BEAT:
                     stop_val = 48.0 * duration / resolution
@@ -293,21 +305,17 @@ class BmsonParser:
                         'beat': beat,
                         'time': 0.0,
                         'channel': '09',
-                        'stop': float(stop_val)
+                        'stop': stop_val
                     })
 
         # Add SCROLL events
         for scroll_ev in data.get('scroll_events', []):
             y = scroll_ev.get('y', 0)
-            if 0 <= y:
+            y = safe_float(y, min_val=0.0)
+            if y is not None:
                 beat = y / resolution
                 if beat <= _MAX_BEAT:
-                    rate_val = scroll_ev.get('rate', 1.0)
-                    try:
-                        rate_val = float(rate_val)
-                    except (ValueError, TypeError):
-                        rate_val = 1.0
-                    rate_val = max(0.0, rate_val)
+                    rate_val = safe_float(scroll_ev.get('rate', 1.0), min_val=0.0, default=1.0)
                     events.append({
                         'beat': beat,
                         'time': 0.0,

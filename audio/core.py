@@ -13,6 +13,13 @@ except ImportError:
 from helpers.options import load_options
 from audio.resolve_audio_path import resolve_audio_path
 
+# 音声ファイルサイズの上限（デフォルト 100MB）
+_MAX_AUDIO_FILE_SIZE = 100 * 1024 * 1024
+
+# 音声ファイル再生時間の上限（秒）
+# RIFF WAV 16bit 44100Hz stereo で ~10分=100MB を目安に、余裕を持って 30 分を上限とする
+_MAX_AUDIO_DURATION_SEC = 30 * 60  # 1800 秒
+
 class AudioEngine:
     def __init__(self):
         self.sounds = {} # {sound_id: DecodedSoundFile}
@@ -31,6 +38,9 @@ class AudioEngine:
         opts = load_options()
         self.sample_rate = opts.sample_rate
         self.nchannels   = opts.nchannels
+        self.max_memory_bytes = getattr(opts, 'max_memory_mb', 1024) * 1024 * 1024
+        self.total_pcm_bytes = 0
+        self._file_cache = {}  # {canonical_file_path: DecodedSoundFile}
 
         # PlaybackDeviceの初期化 – バッファサイズは milliseconds で指定
         # 3msは攻めすぎてノイズ多いので10msに
@@ -149,6 +159,34 @@ class AudioEngine:
         """音源ファイルをデコードしてメモリにロードする"""
         if not os.path.exists(file_path):
             return False
+
+        real_path = os.path.realpath(file_path)
+        if real_path in self._file_cache:
+            self.sounds[sound_id] = self._file_cache[real_path]
+            return True
+
+        file_size = os.path.getsize(file_path)
+        if file_size > _MAX_AUDIO_FILE_SIZE:
+            basename = os.path.basename(file_path)
+            self.load_errors.append(
+                f"[Audio Load Error]\n  File  : {basename}\n  Reason: Audio file too large ({file_size} bytes, limit is {_MAX_AUDIO_FILE_SIZE} bytes)"
+            )
+            return False
+        # デコード前に再生時間だけを取得して上限チェック（OOM 攻撃対策）
+        try:
+            info = miniaudio.get_file_info(file_path)
+            if info.duration > _MAX_AUDIO_DURATION_SEC:
+                basename = os.path.basename(file_path)
+                self.load_errors.append(
+                    f"[Audio Load Error]\n  File  : {basename}\n"
+                    f"  Reason: Audio duration too long "
+                    f"({info.duration:.1f}s, limit is {_MAX_AUDIO_DURATION_SEC}s)"
+                )
+                return False
+        except miniaudio.DecodeError:
+            # get_file_info が失敗した場合はそのまま decode_file に任せる
+            pass
+
         try:
             # PlaybackDevice と同一のフォーマット（SIGNED16 + 設定チャンネル数 + 設定レート）にデコードする
             sound = miniaudio.decode_file(
@@ -157,7 +195,20 @@ class AudioEngine:
                 nchannels=self.nchannels,
                 sample_rate=self.sample_rate
             )
+            # 16bit = 1サンプル2バイト
+            sound_bytes = len(sound.samples) * 2
+            if self.total_pcm_bytes + sound_bytes > self.max_memory_bytes:
+                basename = os.path.basename(file_path)
+                limit_mb = self.max_memory_bytes // (1024 * 1024)
+                used_mb = self.total_pcm_bytes // (1024 * 1024)
+                self.load_errors.append(
+                    f"[Audio Load Error]\n  File  : {basename}\n  Reason: Audio memory limit exceeded ({used_mb}MB / limit: {limit_mb}MB)"
+                )
+                return False
+
             self.sounds[sound_id] = sound
+            self._file_cache[real_path] = sound
+            self.total_pcm_bytes += sound_bytes
             return True
         except Exception as e:
             # curses 表示のために print せずリストに蓄積する

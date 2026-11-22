@@ -20,6 +20,7 @@ import subprocess
 import unicodedata
 import json
 from collections import defaultdict
+from helpers.sanitizer import is_binary_file
 
 # ---------------------------------------------------------------------------
 # Suspicious Unicode character detection
@@ -28,6 +29,7 @@ from collections import defaultdict
 # Characters that have no legitimate use in a file path or display string and
 # could be used to confuse the terminal or obscure malicious content:
 #   - ASCII control characters (U+0000–U+001F) and DEL (U+007F)
+#   - C1 control characters (U+0080–U+009F: e.g. CSI U+009B, OSC U+009D)
 #   - Zero‑width characters: ZWSP, ZWNJ, ZWJ, LRM, RLM (U+200B–U+200F)
 #   - Bidirectional control characters: LRE, RLE, PDF, LRO, RLO (U+202A–U+202E)
 #   - Bidirectional isolate characters: LRI, RLI, FSI, PDI (U+2066–U+2069)
@@ -35,6 +37,7 @@ from collections import defaultdict
 _SUSPICIOUS_UNICODE_RE = re.compile(
     r'[\x00-\x1f'      # ASCII制御文字 (NUL〜US)
     r'\x7f'             # DEL
+    r'\u0080-\u009f'    # C1制御文字 (PAD〜APC: CSIやOSC等)
     r'\u200b-\u200f'    # ゼロ幅文字 (ZWSP, ZWNJ, ZWJ, LRM, RLM)
     r'\u202a-\u202e'    # 方向性制御文字 (LRE, RLE, PDF, LRO, RLO)
     r'\u2066-\u2069'    # 方向性分離文字 (LRI, RLI, FSI, PDI)
@@ -74,6 +77,9 @@ def parse_song_file(path: Path, encoding: str = "cp932") -> dict:
     For .bmson files (JSON format) the same keys are extracted from the JSON object.
     """
     props = {}
+    if is_binary_file(path):
+        return props  # Binary file detected, reject
+
     ext = path.suffix.lower()
     if ext == ".bmson":
         try:

@@ -1,4 +1,4 @@
-# settings.toml – configuration for Shinonome Mini ver1.88+
+# settings.toml – configuration for Shinonome Mini ver1.91+
 
 #roots for bmsfd.py
 #ここをお持ちのbmsのpathに書き換えてください。
@@ -164,12 +164,13 @@ note_display_offset_ms = 0 # ノーツ描画タイミングのオフセット（
 [audio]
 sample_rate = 24000   # サンプリングレート: 8000/12000/16000/22050/24000/32000/44100/48000 など
 nchannels = 2         # チャンネル数: 1=モノラル, 2=ステレオ
+max_memory_mb = 2048  # 音声展開メモリの上限（MB単位、デフォルト: 1024MB = 1GB）
 
 
 # BMSファイルテキスト読み込み設定
 [bms]
 encoding = "cp932"    # bmsテキストのエンコーディング ("cp932" / "cp949" / "utf-8")
-filter_duplicate_01 = false  # 01ch(BGM)の重複除去(true: 有効 / false: 無効)
+filter_duplicate_01 = true  # 01ch(BGM)の重複除去(true: 有効 / false: 無効)
 
 
 # 外部BMSプレイヤー・ビューアー起動設定

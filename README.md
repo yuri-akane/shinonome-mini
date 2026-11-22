@@ -233,6 +233,7 @@ normal gauge.
 - specialized way of notes flow (acceleration, decceleration, reverse, unstable speed, etc)
    - minus BPM and minus SCROLL may be done, but not be fully tested
    - it is not compatible with other players with minus BPM.
+- minus value STOP
 - midi
 - mp3 may cause delay, same as other players.
 - preview
@@ -250,10 +251,10 @@ normal gauge.
 - show SLOW/FAST
 - "white/green number"
 - constant/max/min hispeed
-- Acceleration of playback itself (e.g., 1.5× speed playback)
+- FREQ,PITCH,SPEED,etc... or Acceleration of playback itself (e.g., 1.5× speed playback)
 - Folder division, random selection, course play, rank course
 
-## TODO (to be verified later)
+## to be continued...
 - Verify bms support that resources (wav, bmp) are divided into subfolders
 - Verify BPM alignment when using bmson (ensure no "-1" bpm offset).
    - espacially, wav/mp3 over 1min (bmson)
@@ -303,4 +304,7 @@ normal gauge.
 - 1.85 duplicate removal on 01ch(BGM) setting, debug MixWaver Mode (also removal duplicated notes at the edge of pane and possible duplicated notes at LN-end-head）and some refactoring
 - 1.86 security update & refactor
 - 1.87 Empty hit POOR (optional; default:off)
-- 1.88 bmson仕様（拡張子のない音源定義）への対応、mode-hintが正常に読めていなかったのを修正、security update
+- 1.88 bmson support for non-extension(file) audio source definition, fixed mode-hint support, security update
+- 1.89 security update (check filesize and detect text/binary), limitation settings for max memory usage
+- 1.90 security update (check audio duration, Nan/inf value)
+- 1.91 debug MixWaver Mode(#SCROLL)

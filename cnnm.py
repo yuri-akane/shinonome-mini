@@ -19,7 +19,7 @@ from helpers.options import load_options
 
 from player.on_update import make_on_update
 from ui.result import show_result
-from helpers.sanitizer import sanitize_file_path, sanitize_display_string
+from helpers.sanitizer import sanitize_file_path, sanitize_display_string, is_binary_file
 
 
 def safe_addstr(stdscr, y: int, x: int, text: str, attr=curses.A_NORMAL):
@@ -50,6 +50,8 @@ def run_soundonly(args, preloaded_player=None, preloaded_ae=None):
             ae.load_errors = preloaded_ae.load_errors
             ae._loaded_count = preloaded_ae._loaded_count
             ae._total_count = preloaded_ae._total_count
+            ae.total_pcm_bytes = preloaded_ae.total_pcm_bytes
+            ae._file_cache = preloaded_ae._file_cache
         player.audio = ae  # player が新しい ae を使うよう差し替え
     else:
         # --- CLI --soundonly パス（従来通り） ---
@@ -61,6 +63,10 @@ def run_soundonly(args, preloaded_player=None, preloaded_ae=None):
         sanitized_path = sanitize_file_path(args.bmsfile)
         if not sanitized_path:
             print(f'Error: Invalid or non-existent BMS file: {args.bmsfile}')
+            sys.exit(1)
+
+        if is_binary_file(sanitized_path):
+            print(f'Error: Binary file detected (contains NUL bytes): {sanitized_path}')
             sys.exit(1)
 
         ae = AudioEngine()
@@ -155,6 +161,8 @@ def main(stdscr, args):
         sanitized_path = sanitize_file_path(args.bmsfile)
         if sanitized_path:
             try:
+                if is_binary_file(sanitized_path):
+                    raise ValueError(f"Binary file detected (contains NUL bytes): {sanitized_path}")
                 player.load_chart(
                     str(sanitized_path),
                     encoding=init_opts.bms_encoding,
